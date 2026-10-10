@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>seedsearch</AssemblyName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <ServerGarbageCollector>true</ServerGarbageCollector>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ConcurrentGarbageCollector>true</ConcurrentGarbageCollector>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="SeedSearchGui/**" />
+    <Compile Remove="Tests/**" />
+    <None Remove="SeedSearchGui/**" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="System.IO.Hashing">
+      <HintPath>..\sts2-cli\lib\System.IO.Hashing.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+</Project>

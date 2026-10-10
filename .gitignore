@@ -1,0 +1,23 @@
+# Build output
+bin/
+obj/
+.vs/
+.idea/
+*.user
+*.suo
+
+# Search output and recovery state
+results/
+hits.jsonl
+*.checkpoint.json
+*.checkpoint.json.bak
+*.errors.jsonl
+*.lock
+*.log
+
+# Local reference/dependency worktrees
+.local/
+.reference/
+sts2-cli/
+__pycache__/
+*.pyc

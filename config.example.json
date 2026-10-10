@@ -1,0 +1,46 @@
+{
+  // ===== 搜种器配置（CLI / GUI 共用）=====
+  "character": "Silent",            // 猎人（Ironclad/Silent/Defect/Regent/Necrobinder）
+  "singlePlayer": true,             // 当前模型只支持单人；没有 Deprived 卡池
+  "ascension": 10,                  // ① 进阶10（A1起精英数量×1.6；A7起使用稀缺卡牌赔率）
+  "act1": "Overgrowth",             // ② 第一幕：Overgrowth=密林 / Underdocks=暗港
+                                    //    第一幕由 act_selection RNG 与账号状态决定，此处是过滤条件；空=任意
+  "underdocksUnlocked": true,
+  "underdocksDiscovered": true,
+  "bossAllow": ["THE_KIN_BOSS"],    // ③ 第一幕 Boss 白名单（snake id，空=任意）
+                                    //    密林: VANTOM_BOSS / CEREMONIAL_BEAST_BOSS / THE_KIN_BOSS
+                                    //    暗港: SOUL_FYSH_BOSS / ...
+  "normalStrongPrefixLength": 0,    // ④ 强怪池前 N 个位置；0=按所选组合数量，空组合=不限
+  "normalStrongAllow": [],          //    组合中的每个小怪都必须出现在弱怪之后的前 N 项
+  "firstEliteAllow": [],            //    第一个精英的可选怪物组合，空=不限
+  "eliteBlock": false,              //    true=不存在绕过精英到达 Boss 的路线
+  "noRestBeforeFirstElite": false, //    true=每条/候选路线首次精英前不能出现火堆
+  "neowPositives": ["WingedBoots", "LavaRock", "GoldenPearl", "PreciseScissors"],
+                                    // ⑤ 捏奥两个正面选项都必须在此集合（类名，空=任意）
+  "neowCurses": ["DowsingRod", "CursedPearl", "HeftyTablet"],
+                                    //    诅咒位（第三项）必须在此集合（空=任意）
+  "routeMode": "all",               // ⑥ "all" = 无论哪条路，前X个房间必须全为战斗（小怪/精英/?摇出怪物房）
+                                    //    "exists" = 只需存在一条满足条件的路线
+  "mapMode": "search",             // 精确搜索简图；full=完整地图对照
+  "maxSearchFloor": 10,             // 只在第一幕前10层内验证条件，开局战斗=第1层；与 X 分开
+  "minFightsChecked": 3,            // ⑥ X：前 X 场；且这 X 场的三选一卡牌必须全部出自 allowedCards
+                                    //    每条路线独立检查；前5行不能出现精英，其奖励可在建图前预筛
+  "checkFromFirstUnknown": false,   // exists 模式：false=从开局战斗检查；true=从首个?开始
+  "unknownMonsterStreak": 0,        // 前 K 个?必须出怪，all要求所有路线满足，exists只须一条
+  "neowChoice": -1,                 // -1=不应用效果；0/1/2=实际选择的捏奥项，执行一次后继续重放
+                                    // 指定实际项后，其全部随机卡候选/变形结果也检查，即使 X=0；固定诅咒不检查
+  "allowedCards": [                 // ⑦ 卡牌白名单（职业/无色/异色；类名或 snake id，空=任意）
+    "Deflect", "Backflip", "Footwork", "BladeDance", "Accuracy",
+    "EscapePlan", "PiercingWail", "Prepared", "Untouchable", "DodgeAndRoll",
+    "Predator", "Outbreak", "Survivor", "Slice", "Expertise",
+    "LegSweep", "DeadlyPoison", "SuckerPunch", "PoisonedStab", "Neutralize"
+  ],
+  "findUntilHit": false,            // true=不限制数量，直到找到一个符合条件的种子；可手动停止
+  "resumeFromCheckpoint": true,     // 检测到同一输出/条件的检查点时继续；false=忽略检查点并从头开始
+  "count": 500000,                  // 随机枚举种子数；findUntilHit=true 时忽略
+  "seedListFile": "",              // 可填写 txt/jsonl 名单；处理全部行，覆盖 count 的含义
+  "rngSeed": 20261008,
+  "startIndex": 0,                  // 同一随机键下的枚举起点；完整完成后可接续下一段
+  "threads": 0,                     // 0 = 全核
+  "outFile": "hits.jsonl"           // 命中输出（JSON Lines）
+}
