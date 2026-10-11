@@ -77,3 +77,4 @@ RegressionTests.Run(Path.GetFullPath(Path.Combine(Path.GetDirectoryName(Path.Get
 MapModeTests.Run();
 FindUntilHitTests.Run();
 CheckpointTests.Run();
+IdleSearchTests.Run();

@@ -197,6 +197,7 @@ public static class Program
         Console.WriteLine(cfg.seedListFile.Length > 0 ? $"名单模式: {cfg.seedListFile}"
             : cfg.findUntilHit ? $"找到为止: 从索引 {cfg.startIndex} 持续搜索，不限制数量，随机键={cfg.rngSeed}"
             : $"范围模式: [{cfg.startIndex}, {cfg.startIndex + (ulong)cfg.count}) 随机键={cfg.rngSeed}");
+        if (cfg.idleSearch) Console.WriteLine("闲时搜索：低优先级运行，按其他应用 CPU 负载自动让步；负载下降后恢复。");
         if (cfg.seedListFile.Length == 0)
             Console.WriteLine(cfg.resumeFromCheckpoint ? $"自动续跑: 检查 {Path.GetFullPath(cfg.outFile)}.checkpoint.json" : "自动续跑: 关闭（忽略旧检查点）");
         if (cfg.findUntilHit) Console.WriteLine("找到一个符合全部条件的种子后保存并自动停止；Ctrl+C 可手动停止。");
@@ -206,7 +207,7 @@ public static class Program
         try
         {
             var result = SearchEngine.Run(cfg, null, p =>
-                Console.WriteLine($"评估 {p.Evaluated:N0}{(p.Total.HasValue ? $"/{p.Total:N0}" : "")} · 命中 {p.Hits:N0} · {p.SeedsPerSec:N0} seeds/s · {p.Elapsed.TotalSeconds:F1}s"), cts.Token);
+                Console.WriteLine($"评估 {p.Evaluated:N0}{(p.Total.HasValue ? $"/{p.Total:N0}" : "")} · 命中 {p.Hits:N0} · {p.SeedsPerSec:N0} seeds/s · {p.Elapsed.TotalSeconds:F1}s{(p.Idle == null ? "" : " · " + p.Idle.Description)}"), cts.Token);
             string outcome = cfg.findUntilHit && result.Progress.Hits > 0 ? "已找到，自动停止" : result.Canceled ? "已停止" : "完成";
             Console.WriteLine($"{outcome}{(result.Resumed ? "（从检查点续跑" + (result.RecoveredCheckpoint ? "备份" : "") + (result.RecoveredOutput ? "，已回退尾部" : "") + "）" : "")}: 评估 {result.Progress.Evaluated:N0} · 保存 {result.Progress.Hits:N0} 个结果 · {result.Progress.Stages}");
             Console.WriteLine($"排错记录: {result.DiagnosticsPath}");

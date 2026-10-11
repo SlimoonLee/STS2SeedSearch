@@ -17,6 +17,7 @@ public sealed class MainForm : Form
         _untilFound = new() { Text = "找到一个为止（不限制数量）", AutoSize = true },
         _continueLast = new() { Text = "从上次继续", AutoSize = true },
         _resume = new() { Text = "自动续跑（检查点）", Checked = true, AutoSize = true },
+        _idleSearch = new() { Text = "闲时搜索（有其他负载时自动让步）", AutoSize = true },
         _eliteBlock = new() { Text = "精英堵路（所有路线都必须经过精英）", AutoSize = true },
         _noRestBeforeElite = new() { Text = "第一个精英前禁止火堆", AutoSize = true };
     readonly TextBox _input = new() { Dock = DockStyle.Fill, PlaceholderText = "留空则枚举新种子；支持 txt / jsonl" },
@@ -116,9 +117,10 @@ public sealed class MainForm : Form
         var rangePage = new TabPage("范围与文件");
         var rangeScroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
         rangeScroll.Controls.Add(SettingsGroup("搜索范围与文件", new[] {
-            ("", (Control)_untilFound), ("", (Control)_continueLast), ("", (Control)_resume), ("数量", _count), ("随机键", _rng), ("起始索引", _offset), ("线程", _threads), ("保存间隔(秒)", _checkpointInterval),
+            ("", (Control)_untilFound), ("", (Control)_continueLast), ("", (Control)_resume), ("", (Control)_idleSearch), ("数量", _count), ("随机键", _rng), ("起始索引", _offset), ("线程", _threads), ("保存间隔(秒)", _checkpointInterval),
             ("输入名单", BrowseRow(_input, false)), ("输出 JSONL", BrowseRow(_output, true)),
             ("", Note("找到为止：忽略数量，按当前条件持续搜索，命中一个后保存并自动停止，也可手动停止。名单模式找到即停；未命中则处理到名单末尾。")),
+            ("", Note("闲时搜索：搜索线程使用低优先级，并根据其他应用占用的 CPU 动态减小并行度和工作时间；负载下降后自动恢复。监测不可用时保守限制为单线程约20%工作比例。")),
             ("", Note("线程 0=自动。随机范围会保存带校验和的 .checkpoint.json 及 .bak；断电后只重扫最近未提交块，并直接跳过已完成范围。结果旁还会保留 .errors.jsonl 排错记录；名单模式不使用检查点。")) }));
         rangePage.Controls.Add(rangeScroll); _configuration.TabPages.Add(rangePage);
         var mapPage = new TabPage("地图范围");
@@ -224,6 +226,7 @@ public sealed class MainForm : Form
         _mapMode.SelectedIndexChanged += (_, _) => { InvalidateContinuation(); Summary(); };
         _untilFound.CheckedChanged += (_, _) => { InvalidateContinuation(); Summary(); };
         _resume.CheckedChanged += (_, _) => Summary();
+        _idleSearch.CheckedChanged += (_, _) => Summary();
         _continueLast.CheckedChanged += (_, _) => ContinuationChanged();
         _unlocked.CheckedChanged += (_, _) => { InvalidateContinuation(); Summary(); };
         _discovered.CheckedChanged += (_, _) => { InvalidateContinuation(); Summary(); };
@@ -304,7 +307,7 @@ public sealed class MainForm : Form
         _fromUnknown.Enabled = _mode.SelectedIndex == 1;
         _discovered.Enabled = _unlocked.Checked;
         _count.Enabled = !_untilFound.Checked;
-        _summary.Text = $"{Loc.Characters[_character.SelectedIndex].Cn} · A{_asc.Value} · {Loc.Acts[_act.SelectedIndex].Cn} · Boss {_bosses.CheckedIds().Length} 项 · 强怪前 {_strongPrefix.Value} / 白名单 {_strongs.CheckedIds().Length} 项 · 首精英 {_firstElites.CheckedIds().Length} 项 · 堵路 {_eliteBlock.Checked} · 禁火 {_noRestBeforeElite.Checked} · 捏奥 {_positives.CheckedIds().Length}+{_curses.CheckedIds().Length} 项 · 卡牌 {_cards.CheckedIds().Length} 项 · 遗物序列 {_relics.CheckedIds().Length} 项   |   "
+        _summary.Text = $"{Loc.Characters[_character.SelectedIndex].Cn} · A{_asc.Value} · {Loc.Acts[_act.SelectedIndex].Cn} · Boss {_bosses.CheckedIds().Length} 项 · 强怪前 {_strongPrefix.Value} / 白名单 {_strongs.CheckedIds().Length} 项 · 首精英 {_firstElites.CheckedIds().Length} 项 · 堵路 {_eliteBlock.Checked} · 禁火 {_noRestBeforeElite.Checked} · 捏奥 {_positives.CheckedIds().Length}+{_curses.CheckedIds().Length} 项 · 卡牌 {_cards.CheckedIds().Length} 项 · 遗物序列 {_relics.CheckedIds().Length} 项 · 闲时 {_idleSearch.Checked}   |   "
             + (_fights.Value == 0 && _unknowns.Value == 0 ? "仅筛开局（不建图）" : $"前 {_lastFloor.Value} 层 · {(_mapMode.SelectedIndex == 0 ? "简图" : "全图")} · {(_mode.SelectedIndex == 0 ? "全部路线" : "存在路线")} · 检查 {_fights.Value} 场 · 前 {_unknowns.Value} 个 ? 出怪")
             + (_untilFound.Checked ? " · 找到一个即停" : "") + (_continueLast.Checked ? " · 从上次继续" : _resume.Checked ? " · 自动续跑" : "");
         if (_latest != null && _task is { IsCompleted: true }) _status.Text = "条件已修改 · 当前显示上次搜索结果";
@@ -319,7 +322,7 @@ public sealed class MainForm : Form
         neowChoice = _choice.SelectedIndex - 1, routeMode = _mode.SelectedIndex == 0 ? "all" : "exists",
         minFightsChecked = (int)_fights.Value, unknownMonsterStreak = (int)_unknowns.Value, checkFromFirstUnknown = _fromUnknown.Checked,
         mapMode = _mapMode.SelectedIndex == 0 ? "search" : "full", maxSearchFloor = (int)_lastFloor.Value,
-        allowedCards = _cards.CheckedIds(), allowedRelics = _relics.CheckedIds(), findUntilHit = _untilFound.Checked, resumeFromCheckpoint = _resume.Checked, count = (int)_count.Value, rngSeed = (ulong)_rng.Value, startIndex = (ulong)_offset.Value,
+        allowedCards = _cards.CheckedIds(), allowedRelics = _relics.CheckedIds(), findUntilHit = _untilFound.Checked, resumeFromCheckpoint = _resume.Checked, idleSearch = _idleSearch.Checked, count = (int)_count.Value, rngSeed = (ulong)_rng.Value, startIndex = (ulong)_offset.Value,
         threads = (int)_threads.Value, checkpointIntervalSeconds = (int)_checkpointInterval.Value, outFile = _output.Text, seedListFile = _input.Text
     }.ValidatedCopy();
 
@@ -336,7 +339,7 @@ public sealed class MainForm : Form
             _mode.SelectedIndex = cfg.routeMode == "all" ? 0 : 1; _choice.SelectedIndex = cfg.neowChoice + 1;
             _fights.Value = cfg.minFightsChecked; _unknowns.Value = cfg.unknownMonsterStreak; _fromUnknown.Checked = cfg.checkFromFirstUnknown;
             _mapMode.SelectedIndex = cfg.mapMode == "search" ? 0 : 1; _lastFloor.Value = cfg.maxSearchFloor;
-            _untilFound.Checked = cfg.findUntilHit; _resume.Checked = cfg.resumeFromCheckpoint; _count.Value = Math.Clamp(cfg.count, 1, int.MaxValue);
+            _untilFound.Checked = cfg.findUntilHit; _resume.Checked = cfg.resumeFromCheckpoint; _idleSearch.Checked = cfg.idleSearch; _count.Value = Math.Clamp(cfg.count, 1, int.MaxValue);
             _rng.Value = cfg.rngSeed; _offset.Value = cfg.startIndex; _threads.Value = cfg.threads; _checkpointInterval.Value = cfg.checkpointIntervalSeconds;
             _input.Text = cfg.seedListFile; _output.Text = cfg.outFile;
             PopulateCards(); _cards.SelectIds(cfg.allowedCards); PopulateRelics(); _relics.SelectIds(cfg.allowedRelics); PopulateBosses(); _bosses.SelectIds(cfg.bossAllow); PopulateEncounters();
@@ -505,6 +508,7 @@ public sealed class MainForm : Form
         _status.Text = $"评估 {progress.Evaluated:N0}{(progress.Total.HasValue ? $"/{progress.Total:N0}" : "")} · 命中 {progress.Hits:N0} · {progress.SeedsPerSec:N0}/s"
             + (progress.Remaining.HasValue ? $" · 剩余约 {progress.Remaining.Value:hh\\:mm\\:ss}" : "");
         _stats.Text = progress.Stages + $"   |   显示 {_results.Items.Count:N0}/{progress.Hits:N0} 命中";
+        if (progress.Idle != null) _stats.Text += $"   |   {progress.Idle.Description}";
     }
     void ShowDetail()
     {

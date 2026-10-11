@@ -9,6 +9,7 @@ public sealed record SearchProgress(long Evaluated, long Hits, long? Total, Time
     public double SeedsPerSec => Evaluated / Math.Max(0.001, Elapsed.TotalSeconds);
     public TimeSpan? Remaining => Total.HasValue && Evaluated > 0
         ? TimeSpan.FromSeconds(Math.Max(0, Total.Value - Evaluated) / SeedsPerSec) : null;
+    public IdleSearchStatus Idle { get; init; }
 }
 public sealed record SearchResult(SearchProgress Progress, bool Canceled)
 {
@@ -154,9 +155,12 @@ public static class SearchEngine
             MaxDegreeOfParallelism = cfg.threads == 0 ? Environment.ProcessorCount : cfg.threads,
             CancellationToken = ct
         };
+        using var idleGovernor = cfg.idleSearch ? new IdleSearchGovernor(options.MaxDegreeOfParallelism) : null;
+        idleGovernor?.Start(ct);
         long? total = randomMode && !cfg.findUntilHit
             ? (long)((end - cfg.startIndex) - tracker.CompletedCandidates) : null;
-        SearchProgress Snapshot() => new(Volatile.Read(ref evaluated), Volatile.Read(ref hits), total, clock.Elapsed, totals.Snapshot());
+        SearchProgress Snapshot() => new(Volatile.Read(ref evaluated), Volatile.Read(ref hits), total, clock.Elapsed, totals.Snapshot())
+        { Idle = idleGovernor?.Status };
         void Report(bool force)
         {
             long now = clock.ElapsedMilliseconds, previous = Volatile.Read(ref lastReport);
@@ -170,6 +174,12 @@ public static class SearchEngine
             Interlocked.Add(ref evaluated, worker.Completed);
             worker.Stages = new();
             worker.Completed = 0;
+        }
+        Worker NewWorker() => new() { IdlePermit = idleGovernor?.CreatePermit() };
+        void FinishWorker(Worker worker)
+        {
+            Flush(worker);
+            worker.IdlePermit?.Dispose();
         }
         void CommitHits(IReadOnlyList<Hit> blockHits)
         {
@@ -218,6 +228,7 @@ public static class SearchEngine
         {
             if (loop.IsStopped) return worker;
             ct.ThrowIfCancellationRequested();
+            if (worker.IdlePermit != null && !worker.IdlePermit.Wait(ct, () => loop.IsStopped)) return worker;
             Hit hit;
             try { hit = evaluator.Evaluate(seed, worker.Stages, ct); }
             catch (OperationCanceledException) { throw; }
@@ -228,6 +239,7 @@ public static class SearchEngine
         {
             if (loop.IsStopped) return worker;
             ct.ThrowIfCancellationRequested();
+            if (worker.IdlePermit != null && !worker.IdlePermit.Wait(ct, () => loop.IsStopped || Volatile.Read(ref claimed) != 0)) return worker;
             ulong hash = SeedUtil.HashAt(index, cfg.rngSeed, out ulong permutedIndex);
             Hit hit;
             try { hit = evaluator.EvaluateHash(hash, worker.Stages, ct); }
@@ -285,10 +297,10 @@ public static class SearchEngine
         try
         {
             if (cfg.seedListFile.Length == 0)
-                Parallel.ForEach(Blocks(), options, () => new Worker(), ProcessBlock, Flush);
+                Parallel.ForEach(Blocks(), options, NewWorker, ProcessBlock, FinishWorker);
             else
                 Parallel.ForEach(File.ReadLines(cfg.seedListFile).Where(line => !string.IsNullOrWhiteSpace(line)), options,
-                    () => new Worker(), (line, loop, worker) => loop.IsStopped ? worker : Process(ParseSeed(line), loop, worker), Flush);
+                    NewWorker, (line, loop, worker) => loop.IsStopped ? worker : Process(ParseSeed(line), loop, worker), FinishWorker);
             if (!cfg.findUntilHit || Volatile.Read(ref hits) == 0) total ??= Volatile.Read(ref evaluated);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { canceled = true; }
@@ -361,6 +373,7 @@ public static class SearchEngine
     {
         public SearchCounters Stages = new();
         public int Completed;
+        public IdleSearchGovernor.Permit IdlePermit;
     }
     readonly record struct SearchBlock(ulong Ordinal, ulong Start, ulong EndExclusive);
 }

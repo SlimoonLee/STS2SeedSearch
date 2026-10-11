@@ -44,5 +44,6 @@
   "rngSeed": 20261008,
   "startIndex": 0,                  // 同一随机键下的枚举起点；完整完成后可接续下一段
   "threads": 0,                     // 0 = 全核
+  "idleSearch": false,              // 闲时模式：低优先级；按其他应用 CPU 负载自动降低并行度/工作比例
   "outFile": "hits.jsonl"           // 命中输出（JSON Lines）
 }

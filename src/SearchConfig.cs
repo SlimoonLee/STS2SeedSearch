@@ -40,6 +40,9 @@ public sealed class SearchConfig
     public ulong startIndex { get; set; }
     public int threads { get; set; }
     public string outFile { get; set; } = "hits.jsonl";
+    // False 不写入 JSON，保留旧检查点 Config 的序列化校验和。
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public bool idleSearch { get; set; }           // 低优先级且按其他应用 CPU 负载自动让步
 
     public static readonly JsonSerializerOptions JsonOptions = new()
     {

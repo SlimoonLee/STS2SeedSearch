@@ -36,7 +36,7 @@ static class Program
                     neowPositives = new[] { "LavaRock", "WingedBoots" }, neowCurses = new[] { "DowsingRod" }, neowChoice = 1,
                     normalStrongPrefixLength = 2, normalStrongAllow = new[] { "CorpseSlugsNormal", "CultistsNormal", "FossilStalkerNormal", "GremlinMercNormal", "HauntedShipNormal" },
                     firstEliteAllow = new[] { "PhantasmalGardenersElite" }, eliteBlock = true, noRestBeforeFirstElite = true,
-                    findUntilHit = true, count = 300, threads = 4, rngSeed = ulong.MaxValue, startIndex = 12345, outFile = Path.Combine(Path.GetTempPath(), "gui-test.jsonl") };
+                    findUntilHit = true, idleSearch = true, count = 300, threads = 4, rngSeed = ulong.MaxValue, startIndex = 12345, outFile = Path.Combine(Path.GetTempPath(), "gui-test.jsonl") };
                 form.ApplyConfig(cfg);
                 form.VerifyEncounterControls();
                 form.VerifyRelicControls();

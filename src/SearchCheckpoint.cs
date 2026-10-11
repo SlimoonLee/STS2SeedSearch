@@ -205,6 +205,7 @@ internal static class SearchCheckpointStore
         if (normalized.seedListFile.Length > 0) normalized.seedListFile = Path.GetFullPath(normalized.seedListFile);
         var json = JsonNode.Parse(JsonSerializer.Serialize(normalized, SearchConfig.JsonOptions)).AsObject();
         json.Remove("checkpointIntervalSeconds");
+        json.Remove("idleSearch"); // 调度方式不改变已搜索范围或候选资格。
         if (!legacy)
         {
             json.Remove("threads");

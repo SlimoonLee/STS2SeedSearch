@@ -43,6 +43,9 @@ static class CheckpointTests
             Assert(partial.Canceled && File.Exists(checkpoint), "Canceled range did not leave a checkpoint");
             Assert(File.ReadLines(output).Count() > 0 && File.ReadLines(output).Count() < cfg.count, "Partial output was not block committed");
             Assert(SearchEngine.HasCompatibleCheckpoint(cfg), "A matching checkpoint was not offered for continuation");
+            cfg.idleSearch = true;
+            Assert(SearchEngine.HasCompatibleCheckpoint(cfg), "Changing only idle scheduling incorrectly invalidated a checkpoint");
+            cfg.idleSearch = false;
             using (var checkpointDoc = JsonDocument.Parse(File.ReadAllText(checkpoint)))
                 Assert(checkpointDoc.RootElement.GetProperty("CompletedBlocks").GetArrayLength() > 0, "Checkpoint did not record a completed block");
 
