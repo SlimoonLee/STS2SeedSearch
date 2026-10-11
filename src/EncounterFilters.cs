@@ -6,7 +6,7 @@ public static class EncounterFilters
     public static bool QueueMatches(ActDef act, QueueGen.QueueSummary summary, SearchConfig cfg)
     {
         if (cfg.normalStrongAllow.Length > 0
-            && !cfg.normalStrongAllow.All(summary.NormalStrongPrefix.Contains)) return false;
+            && !summary.NormalStrongPrefix.All(cfg.normalStrongAllow.Contains)) return false;
         return cfg.firstEliteAllow.Length == 0
             || summary.FirstElite != null && cfg.firstEliteAllow.Contains(summary.FirstElite);
     }
@@ -16,8 +16,8 @@ public static class EncounterFilters
         if (cfg.normalStrongAllow.Length > 0)
         {
             int count = Math.Min(cfg.normalStrongPrefixLength, rooms.Normal.Count - act.WeakCount);
-            var prefix = rooms.Normal.Skip(act.WeakCount).Take(count).ToHashSet(StringComparer.Ordinal);
-            if (!cfg.normalStrongAllow.All(prefix.Contains)) return false;
+            var prefix = rooms.Normal.Skip(act.WeakCount).Take(count);
+            if (!prefix.All(cfg.normalStrongAllow.Contains)) return false;
         }
         return cfg.firstEliteAllow.Length == 0 || rooms.Elite.Count > 0 && cfg.firstEliteAllow.Contains(rooms.Elite[0]);
     }

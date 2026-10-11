@@ -93,12 +93,10 @@ public sealed class SearchConfig
         cfg.normalStrongAllow = Normalize(normalStrongAllow, acts.SelectMany(a => a.Regular).Select(e => e.Name), "强怪");
         cfg.firstEliteAllow = Normalize(firstEliteAllow, acts.SelectMany(a => a.Elites).Select(e => e.Name), "第一个精英");
         if (normalStrongPrefixLength is < 0 or > 12)
-            throw new ArgumentException("强怪池前缀长度必须在 0–12 之间；0 表示按所选组合长度检查。");
+            throw new ArgumentException("强怪池前缀长度必须在 0–12 之间；0 表示按白名单数量检查。");
         if (cfg.normalStrongAllow.Length > 0)
         {
             if (cfg.normalStrongPrefixLength == 0) cfg.normalStrongPrefixLength = cfg.normalStrongAllow.Length;
-            if (cfg.normalStrongPrefixLength < cfg.normalStrongAllow.Length)
-                throw new ArgumentException("强怪池前缀长度不能小于所选怪物组合数量。");
         }
         else if (cfg.normalStrongPrefixLength != 0)
             throw new ArgumentException("指定强怪池前缀长度时，必须至少选择一个强怪；清空长度即可取消条件。");

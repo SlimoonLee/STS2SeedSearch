@@ -71,7 +71,7 @@ dotnet bin/Release/net10.0/seedsearch.dll dump BBBBBBBBBBB2 Underdocks Silent
 
 `act1` 是第一幕**过滤器**，不是强制指定生成幕：种子 `act_selection` RNG 与暗港账号状态决定第一幕。暗港未解锁只会有密林；已解锁但未发现时强制暗港；均已满足时两幕各 50%。
 
-遭遇条件在建图前读取第一幕队列：`normalStrongAllow` 要求所选强怪全部出现在弱怪之后的强怪池前 `normalStrongPrefixLength` 项内，长度为 0 时按所选组合数量；`firstEliteAllow` 只匹配精英队列第一项。`eliteBlock` 检查完整地图，要求不存在绕过所有精英直达 Boss 的路线；`noRestBeforeFirstElite` 检查路线从起点到首次精英（或直接到 Boss）的前缀，火堆出现在首次精英之前的路线会被淘汰；若首次精英在搜索截止层之后，只继续检查静态地图前缀，不扩大卡牌、奖励或问号的筛选范围。`routeMode="all"` 要求每条路线通过路线条件，`exists` 只需一条；若还要强制所有路线遇到精英，请同时启用 `eliteBlock`。
+遭遇条件在建图前读取第一幕队列：`normalStrongAllow` 是强怪白名单，要求弱怪之后的强怪池前 `normalStrongPrefixLength` 项每一项都属于该集合；白名单数量可以大于 N，长度为 0 时按白名单数量；`firstEliteAllow` 只匹配精英队列第一项。`eliteBlock` 检查完整地图，要求不存在绕过所有精英直达 Boss 的路线；`noRestBeforeFirstElite` 检查路线从起点到首次精英（或直接到 Boss）的前缀，火堆出现在首次精英之前的路线会被淘汰；若首次精英在搜索截止层之后，只继续检查静态地图前缀，不扩大卡牌、奖励或问号的筛选范围。`routeMode="all"` 要求每条路线通过路线条件，`exists` 只需一条；若还要强制所有路线遇到精英，请同时启用 `eliteBlock`。
 
 捏奥正面白名单要求两个正面选项都在其中，诅咒白名单要求第三项在其中。`neowChoice=-1` 不应用效果；0、1、2 分别模拟实际选择的三个展示选项。只有一项正面，或仅选一对互斥遗物，会在搜索前指出条件不可能满足。
 
@@ -86,7 +86,7 @@ dotnet bin/Release/net10.0/seedsearch.dll dump BBBBBBBBBBB2 Underdocks Silent
 | `minFightsChecked` | X；0 表示不检查战斗奖励 |
 | `checkFromFirstUnknown` | 仅 exists：true 从第一个问号起检查；false 从开局首场战斗起检查 |
 | `unknownMonsterStreak` | K；前 K 个问号均需摇出怪物；all 要求所有路线满足，exists 只需一条 |
-| `normalStrongPrefixLength` / `normalStrongAllow` | 强怪池前 N 项必须包含所选小怪组合；N=0 按组合数量，空组合=不限；弱怪不计入 N |
+| `normalStrongPrefixLength` / `normalStrongAllow` | 强怪池前 N 项每一项都必须属于所选白名单；白名单可以多于 N；N=0 按白名单数量，空组合=不限；弱怪不计入 N |
 | `firstEliteAllow` | 第一幕精英遭遇队列的第一项必须属于所选组合；空=不限 |
 | `eliteBlock` | true 时完整地图上不存在不经过精英即可到达 Boss 的路线；与 Boss 队列筛选独立 |
 | `noRestBeforeFirstElite` | true 时路线首次精英前不能出现火堆；all/exists 分别对应每条/至少一条路线；未遇到精英而到达 Boss 的路线需配合 `eliteBlock` 才会被排除 |

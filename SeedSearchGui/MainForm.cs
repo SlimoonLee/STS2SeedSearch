@@ -154,12 +154,12 @@ public sealed class MainForm : Form
         _strongPrefix.Width = 82;
         encounterSettings.Controls.Add(new Label { Text = "强怪池前 N 个", AutoSize = true, Padding = new Padding(0, 7, 2, 0) });
         encounterSettings.Controls.Add(_strongPrefix);
-        encounterSettings.Controls.Add(new Label { Text = "（0=按组合数量；空组合=不限）", AutoSize = true, Padding = new Padding(2, 7, 10, 0) });
+        encounterSettings.Controls.Add(new Label { Text = "（0=按白名单数量；空组合=不限）", AutoSize = true, Padding = new Padding(2, 7, 10, 0) });
         encounterSettings.Controls.Add(_eliteBlock);
         encounterSettings.Controls.Add(_noRestBeforeElite);
         encounterLayout.Controls.Add(encounterSettings, 0, 0);
-        encounterLayout.Controls.Add(Note("以下选项全部从游戏配置自动读取，直接勾选即可，无需手动输入。强怪组合必须全部出现在普通遭遇队列中、弱怪之后的前 N 个位置；第一个精英从精英队列第一项匹配。每项名称对应游戏中的整组怪物遭遇。"), 0, 1);
-        var strongGroup = new GroupBox { Text = "强怪组合（游戏配置，全选项均须出现）", Dock = DockStyle.Fill, Height = 250, MinimumSize = new Size(0, 250), Padding = new Padding(3) }; strongGroup.Controls.Add(_strongs);
+        encounterLayout.Controls.Add(Note("以下选项全部从游戏配置自动读取，直接勾选即可，无需手动输入。强怪白名单中的组合可以多于 N 个；弱怪之后的前 N 个强怪每一项都必须属于所选白名单。第一个精英从精英队列第一项匹配。每项名称对应游戏中的整组怪物遭遇。"), 0, 1);
+        var strongGroup = new GroupBox { Text = "强怪白名单（游戏配置，前 N 项均须属于所选组合）", Dock = DockStyle.Fill, Height = 250, MinimumSize = new Size(0, 250), Padding = new Padding(3) }; strongGroup.Controls.Add(_strongs);
         var eliteGroup = new GroupBox { Text = "第一个精英可选组合（游戏配置，空=不限）", Dock = DockStyle.Fill, Height = 250, MinimumSize = new Size(0, 250), Padding = new Padding(3) }; eliteGroup.Controls.Add(_firstElites);
         encounterLayout.Controls.Add(strongGroup, 0, 2); encounterLayout.Controls.Add(eliteGroup, 0, 3);
         encounters.Controls.Add(encounterLayout); _filters.TabPages.Add(encounters);
@@ -304,7 +304,7 @@ public sealed class MainForm : Form
         _fromUnknown.Enabled = _mode.SelectedIndex == 1;
         _discovered.Enabled = _unlocked.Checked;
         _count.Enabled = !_untilFound.Checked;
-        _summary.Text = $"{Loc.Characters[_character.SelectedIndex].Cn} · A{_asc.Value} · {Loc.Acts[_act.SelectedIndex].Cn} · Boss {_bosses.CheckedIds().Length} 项 · 强怪 {_strongs.CheckedIds().Length}/{_strongPrefix.Value} · 首精英 {_firstElites.CheckedIds().Length} 项 · 堵路 {_eliteBlock.Checked} · 禁火 {_noRestBeforeElite.Checked} · 捏奥 {_positives.CheckedIds().Length}+{_curses.CheckedIds().Length} 项 · 卡牌 {_cards.CheckedIds().Length} 项 · 遗物序列 {_relics.CheckedIds().Length} 项   |   "
+        _summary.Text = $"{Loc.Characters[_character.SelectedIndex].Cn} · A{_asc.Value} · {Loc.Acts[_act.SelectedIndex].Cn} · Boss {_bosses.CheckedIds().Length} 项 · 强怪前 {_strongPrefix.Value} / 白名单 {_strongs.CheckedIds().Length} 项 · 首精英 {_firstElites.CheckedIds().Length} 项 · 堵路 {_eliteBlock.Checked} · 禁火 {_noRestBeforeElite.Checked} · 捏奥 {_positives.CheckedIds().Length}+{_curses.CheckedIds().Length} 项 · 卡牌 {_cards.CheckedIds().Length} 项 · 遗物序列 {_relics.CheckedIds().Length} 项   |   "
             + (_fights.Value == 0 && _unknowns.Value == 0 ? "仅筛开局（不建图）" : $"前 {_lastFloor.Value} 层 · {(_mapMode.SelectedIndex == 0 ? "简图" : "全图")} · {(_mode.SelectedIndex == 0 ? "全部路线" : "存在路线")} · 检查 {_fights.Value} 场 · 前 {_unknowns.Value} 个 ? 出怪")
             + (_untilFound.Checked ? " · 找到一个即停" : "") + (_continueLast.Checked ? " · 从上次继续" : _resume.Checked ? " · 自动续跑" : "");
         if (_latest != null && _task is { IsCompleted: true }) _status.Text = "条件已修改 · 当前显示上次搜索结果";
@@ -590,7 +590,7 @@ public sealed class MainForm : Form
     {
         var cfg = ReadConfig();
         if (cfg.normalStrongPrefixLength != 2
-            || !cfg.normalStrongAllow.ToHashSet(StringComparer.Ordinal).SetEquals(new[] { "CorpseSlugsNormal", "CultistsNormal" })
+            || !cfg.normalStrongAllow.ToHashSet(StringComparer.Ordinal).SetEquals(new[] { "CorpseSlugsNormal", "CultistsNormal", "FossilStalkerNormal", "GremlinMercNormal", "HauntedShipNormal" })
             || !cfg.firstEliteAllow.SequenceEqual(new[] { "PhantasmalGardenersElite" })
             || !cfg.eliteBlock || !cfg.noRestBeforeFirstElite
             || _strongPrefix.Value != 2 || !_eliteBlock.Checked || !_noRestBeforeElite.Checked

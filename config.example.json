@@ -10,8 +10,8 @@
   "bossAllow": ["THE_KIN_BOSS"],    // ③ 第一幕 Boss 白名单（snake id，空=任意）
                                     //    密林: VANTOM_BOSS / CEREMONIAL_BEAST_BOSS / THE_KIN_BOSS
                                     //    暗港: SOUL_FYSH_BOSS / ...
-  "normalStrongPrefixLength": 0,    // ④ 强怪池前 N 个位置；0=按所选组合数量，空组合=不限
-  "normalStrongAllow": [],          //    组合中的每个小怪都必须出现在弱怪之后的前 N 项
+  "normalStrongPrefixLength": 0,    // ④ 强怪池前 N 个位置；0=按白名单数量，空组合=不限
+  "normalStrongAllow": [],          //    前 N 个强怪每一项都必须属于这个白名单（白名单可多于 N）
   "firstEliteAllow": [],            //    第一个精英的可选怪物组合，空=不限
   "eliteBlock": false,              //    true=不存在绕过精英到达 Boss 的路线
   "noRestBeforeFirstElite": false, //    true=每条/候选路线首次精英前不能出现火堆

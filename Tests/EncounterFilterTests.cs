@@ -12,14 +12,17 @@ static class EncounterFilterTests
         var strong = EncounterFilters.StrongQueue(act, rooms);
         Assert(strong.Length == act.Rooms - act.WeakCount, "Strong queue did not start after weak encounters");
         Assert(strong.Distinct().Count() == strong.Length, "Strong queue unexpectedly repeated an encounter");
-        Assert(rooms.Elite.Count >= 2 && strong.Length >= 3, "Act queue fixture is too short");
+        Assert(rooms.Elite.Count >= 2 && strong.Length >= 5, "Act queue fixture is too short");
 
+        var strongWhitelist = strong.Take(5).ToArray();
         var queueConfig = new SearchConfig { act1 = "Overgrowth", underdocksUnlocked = false,
-            normalStrongPrefixLength = 2, normalStrongAllow = strong.Take(2).ToArray(),
+            normalStrongPrefixLength = 2, normalStrongAllow = strongWhitelist,
             firstEliteAllow = new[] { rooms.Elite[0] }, minFightsChecked = 0 };
         var queueHit = new SeedEvaluator(queueConfig).Evaluate(seed);
         Assert(queueHit != null && queueHit.normalQueue.Skip(act.WeakCount).Take(2).SequenceEqual(strong.Take(2))
-            && queueHit.eliteQueue[0] == rooms.Elite[0], "Strong-prefix/first-elite filters or output queue failed");
+            && queueHit.eliteQueue[0] == rooms.Elite[0]
+            && queueConfig.ValidatedCopy().normalStrongAllow.Length == 5,
+            "Strong-prefix whitelist/first-elite filters or output queue failed");
 
         var wrongStrong = strong.Skip(2).First();
         Assert(new SeedEvaluator(new SearchConfig { act1 = "Overgrowth", underdocksUnlocked = false,
@@ -31,7 +34,6 @@ static class EncounterFilterTests
             "First-elite filter accepted the wrong first elite");
 
         Invalid(new SearchConfig { normalStrongPrefixLength = 13 });
-        Invalid(new SearchConfig { normalStrongPrefixLength = 1, normalStrongAllow = new[] { strong[0], strong[1] } });
         Invalid(new SearchConfig { normalStrongAllow = new[] { "DefinitelyNotAnEncounter" } });
         Invalid(new SearchConfig { firstEliteAllow = new[] { "DefinitelyNotAnElite" } });
 
@@ -71,7 +73,7 @@ static class EncounterFilterTests
             }
         }
         Assert(mixed > 0 && matchingExists > 0, "No-fire condition did not cover valid/invalid exists routes");
-        Console.WriteLine($"PASS: strong-pool prefix combinations, first-elite group, elite-block topology, no-fire-before-first-elite route checks and validation ({mixed} mixed maps, {matchingExists} exists/{matchingAll} all matches).");
+        Console.WriteLine($"PASS: strong-pool prefix whitelist, first-elite group, elite-block topology, no-fire-before-first-elite route checks and validation ({mixed} mixed maps, {matchingExists} exists/{matchingAll} all matches).");
     }
 
     static void SummaryMatchesFullQueue()

@@ -34,7 +34,7 @@ static class Program
                 var cfg = new SearchConfig { character = "Defect", act1 = "Underdocks", routeMode = "exists", checkFromFirstUnknown = false,
                     minFightsChecked = 3, unknownMonsterStreak = 1, mapMode = "full", maxSearchFloor = 10, allowedCards = new[] { "Claw", "Coolheaded", "Anger", GameData.CardPools["ColorlessCardPool"].First(c => !GameData.CardMultiplayerOnly.Contains(c)) },
                     neowPositives = new[] { "LavaRock", "WingedBoots" }, neowCurses = new[] { "DowsingRod" }, neowChoice = 1,
-                    normalStrongPrefixLength = 2, normalStrongAllow = new[] { "CorpseSlugsNormal", "CultistsNormal" },
+                    normalStrongPrefixLength = 2, normalStrongAllow = new[] { "CorpseSlugsNormal", "CultistsNormal", "FossilStalkerNormal", "GremlinMercNormal", "HauntedShipNormal" },
                     firstEliteAllow = new[] { "PhantasmalGardenersElite" }, eliteBlock = true, noRestBeforeFirstElite = true,
                     findUntilHit = true, count = 300, threads = 4, rngSeed = ulong.MaxValue, startIndex = 12345, outFile = Path.Combine(Path.GetTempPath(), "gui-test.jsonl") };
                 form.ApplyConfig(cfg);
@@ -79,7 +79,7 @@ static class Program
                 {
                     previewConfig.allowedCards = preview.neow.FilteredCards.Concat(preview.fights.SelectMany(f => f.cards)).Distinct().ToArray();
                     previewConfig.normalStrongPrefixLength = 2;
-                    previewConfig.normalStrongAllow = new[] { "CorpseSlugsNormal", "CultistsNormal" };
+                    previewConfig.normalStrongAllow = new[] { "CorpseSlugsNormal", "CultistsNormal", "FossilStalkerNormal", "GremlinMercNormal", "HauntedShipNormal" };
                     previewConfig.firstEliteAllow = new[] { "PhantasmalGardenersElite" };
                     previewConfig.eliteBlock = true; previewConfig.noRestBeforeFirstElite = true;
                     form.ApplyConfig(previewConfig); form.VerifyNeowDetails(preview);
