@@ -18,6 +18,7 @@ public sealed class MainForm : Form
         _continueLast = new() { Text = "从上次继续", AutoSize = true },
         _resume = new() { Text = "自动续跑（检查点）", Checked = true, AutoSize = true },
         _idleSearch = new() { Text = "闲时搜索（有其他负载时自动让步）", AutoSize = true },
+        _idleRuntime = new() { Text = "闲时模式（运行中可切换）", AutoSize = true, Visible = false },
         _eliteBlock = new() { Text = "精英堵路（所有路线都必须经过精英）", AutoSize = true },
         _noRestBeforeElite = new() { Text = "第一个精英前禁止火堆", AutoSize = true };
     readonly TextBox _input = new() { Dock = DockStyle.Fill, PlaceholderText = "留空则枚举新种子；支持 txt / jsonl" },
@@ -40,6 +41,7 @@ public sealed class MainForm : Form
     readonly Dictionary<string, string[]> _relicMemory = new(StringComparer.Ordinal);
     readonly HashSet<string> _bossMemory = new(StringComparer.Ordinal);
     CancellationTokenSource _cts;
+    SearchRuntimeControl _runtime;
     Task<SearchResult> _task;
     SearchProgress _latest;
     string _cardCharacter = "", _relicCharacter = "", _lastOutput = "", _automaticOutput, _continuationOutput;
@@ -120,7 +122,7 @@ public sealed class MainForm : Form
             ("", (Control)_untilFound), ("", (Control)_continueLast), ("", (Control)_resume), ("", (Control)_idleSearch), ("数量", _count), ("随机键", _rng), ("起始索引", _offset), ("线程", _threads), ("保存间隔(秒)", _checkpointInterval),
             ("输入名单", BrowseRow(_input, false)), ("输出 JSONL", BrowseRow(_output, true)),
             ("", Note("找到为止：忽略数量，按当前条件持续搜索，命中一个后保存并自动停止，也可手动停止。名单模式找到即停；未命中则处理到名单末尾。")),
-            ("", Note("闲时搜索：搜索线程使用低优先级，并根据其他应用占用的 CPU 动态减小并行度和工作时间；负载下降后自动恢复。监测不可用时保守限制为单线程约20%工作比例。")),
+            ("", Note("闲时搜索：搜索线程使用低优先级，并根据其他应用占用的 CPU 动态减小并行度和工作时间；负载下降后自动恢复。运行中可用下方“闲时模式”开关热切换；监测不可用时保守限制为单线程约20%工作比例。")),
             ("", Note("线程 0=自动。随机范围会保存带校验和的 .checkpoint.json 及 .bak；断电后只重扫最近未提交块，并直接跳过已完成范围。结果旁还会保留 .errors.jsonl 排错记录；名单模式不使用检查点。")) }));
         rangePage.Controls.Add(rangeScroll); _configuration.TabPages.Add(rangePage);
         var mapPage = new TabPage("地图范围");
@@ -167,7 +169,7 @@ public sealed class MainForm : Form
         encounters.Controls.Add(encounterLayout); _filters.TabPages.Add(encounters);
         split.Panel2.Controls.Add(_filters); root.Controls.Add(split, 0, 2);
         var run = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true };
-        run.Controls.AddRange(new Control[] { _start, _stop, _copy, _open, _status }); root.Controls.Add(run, 0, 3);
+        run.Controls.AddRange(new Control[] { _start, _stop, _copy, _open, _idleRuntime, _status }); root.Controls.Add(run, 0, 3);
         root.Controls.Add(_progress, 0, 4); root.Controls.Add(_stats, 0, 5);
         var resultSplit = new SplitContainer { Dock = DockStyle.Fill, Size = new Size(1200, 280), SplitterDistance = 830, SplitterWidth = 7 };
         foreach (var (name, width) in new[] { ("种子", 150), ("第一幕", 60), ("Boss", 105), ("捏奥 A", 125), ("捏奥 B", 125), ("诅咒", 115), ("已检查战斗", 95) })
@@ -226,7 +228,21 @@ public sealed class MainForm : Form
         _mapMode.SelectedIndexChanged += (_, _) => { InvalidateContinuation(); Summary(); };
         _untilFound.CheckedChanged += (_, _) => { InvalidateContinuation(); Summary(); };
         _resume.CheckedChanged += (_, _) => Summary();
-        _idleSearch.CheckedChanged += (_, _) => Summary();
+        _idleSearch.CheckedChanged += (_, _) =>
+        {
+            if (_task is { IsCompleted: false } && _runtime != null && _idleRuntime.Checked != _idleSearch.Checked)
+                _runtime.SetIdleSearch(_idleSearch.Checked);
+            Summary();
+        };
+        _idleRuntime.CheckedChanged += (_, _) =>
+        {
+            if (_task is { IsCompleted: false } && _runtime != null)
+            {
+                _runtime.SetIdleSearch(_idleRuntime.Checked);
+                if (_idleSearch.Checked != _idleRuntime.Checked) _idleSearch.Checked = _idleRuntime.Checked;
+            }
+            Summary();
+        };
         _continueLast.CheckedChanged += (_, _) => ContinuationChanged();
         _unlocked.CheckedChanged += (_, _) => { InvalidateContinuation(); Summary(); };
         _discovered.CheckedChanged += (_, _) => { InvalidateContinuation(); Summary(); };
@@ -446,6 +462,8 @@ public sealed class MainForm : Form
         _lastOutput = Path.GetFullPath(cfg.outFile); _latest = null;
         _results.Items.Clear(); _pending.Clear(); _queued = 0;
         _detail.Text = cfg.findUntilHit ? "正在持续搜索…\r\n找到一个符合全部条件的种子后保存并自动停止。" : "正在搜索…\r\n界面最多显示 1,000 个命中，全量结果写入输出文件。";
+        _runtime = new SearchRuntimeControl(cfg.idleSearch);
+        _idleRuntime.Checked = cfg.idleSearch; _idleRuntime.Visible = true; _idleRuntime.Enabled = true;
         _cts = new(); _start.Enabled = false; _stop.Enabled = true; _open.Enabled = _copy.Enabled = false;
         _configuration.Enabled = _filters.Enabled = _tools.Enabled = false;
         _progress.Value = 0;
@@ -454,7 +472,7 @@ public sealed class MainForm : Form
         _task = Task.Run(() => SearchEngine.Run(cfg, hit =>
         {
             if (Interlocked.Increment(ref _queued) <= DisplayLimit) _pending.Enqueue(hit);
-        }, p => Volatile.Write(ref _latest, p), _cts.Token));
+        }, p => Volatile.Write(ref _latest, p), _cts.Token, _runtime));
         try
         {
             var result = await _task; Drain(true);
@@ -481,6 +499,8 @@ public sealed class MainForm : Form
         catch (Exception e) { Drain(true); Error(e is AggregateException aggregate ? aggregate.Flatten().InnerExceptions[0] : e); }
         finally
         {
+            if (_idleSearch.Checked != _idleRuntime.Checked) _idleSearch.Checked = _idleRuntime.Checked;
+            _idleRuntime.Visible = false; _idleRuntime.Enabled = false; _runtime = null;
             _timer.Stop(); _progress.Style = ProgressBarStyle.Continuous;
             _stop.Enabled = false; _start.Enabled = _configuration.Enabled = _filters.Enabled = _tools.Enabled = true;
             _open.Enabled = File.Exists(_lastOutput); _cts.Dispose(); _cts = null;

@@ -19,6 +19,16 @@ static class IdleSearchTests
         policy.Update(0); policy.Update(0);
         Assert(policy.Update(0).Workers >= 2, "Idle policy did not recover gradually after load dropped");
 
+        var runtime = new SearchRuntimeControl(false);
+        using (var switchable = new IdleSearchGovernor(4, new UnavailableCpuSource(), runtime))
+        {
+            Assert(!switchable.Enabled && switchable.Status == null, "Normal mode did not start without idle throttling");
+            runtime.SetIdleSearch(true);
+            Assert(switchable.Enabled && switchable.Status != null, "Runtime switch did not enable idle throttling");
+            runtime.SetIdleSearch(false);
+            Assert(!switchable.Enabled && switchable.Status == null, "Runtime switch did not restore normal mode");
+        }
+
         using var governor = new IdleSearchGovernor(4, new UnavailableCpuSource());
         Assert(!governor.Status.MonitoringAvailable && governor.Status.AllowedWorkers == 1
             && Math.Abs(governor.Status.DutyCycle - 0.2) < 0.0001,

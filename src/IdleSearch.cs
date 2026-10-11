@@ -6,6 +6,23 @@ using System.Runtime.InteropServices;
 
 namespace SeedSearch;
 
+/// <summary>搜索运行期间的调度开关；切换不会改变筛选条件、索引或检查点。</summary>
+public sealed class SearchRuntimeControl
+{
+    int _idleSearch;
+    internal event Action<bool> Changed;
+
+    public SearchRuntimeControl(bool idleSearch = false) => _idleSearch = idleSearch ? 1 : 0;
+    public bool IdleSearch => Volatile.Read(ref _idleSearch) != 0;
+
+    public void SetIdleSearch(bool enabled)
+    {
+        int value = enabled ? 1 : 0;
+        if (Interlocked.Exchange(ref _idleSearch, value) == value) return;
+        Changed?.Invoke(enabled);
+    }
+}
+
 public sealed record IdleSearchStatus(int WorkerLimit, int AllowedWorkers, double DutyCycle,
     double? OtherCpuPercent, bool MonitoringAvailable, bool LowPriority, string Detail)
 {
@@ -93,29 +110,38 @@ internal sealed class IdleSearchGovernor : IDisposable
     readonly ICpuLoadSource _source;
     readonly IdleCpuPolicy _policy;
     readonly BackgroundPriorityScope _priority;
+    readonly SearchRuntimeControl _control;
+    readonly int _workerLimit;
     readonly long _origin = Stopwatch.GetTimestamp();
     static readonly long PeriodTicks = Math.Max(1, Stopwatch.Frequency / 10); // 100 ms
     static readonly long LeaseTicks = Math.Max(1, Stopwatch.Frequency / 50); // 20 ms
     IdleSearchStatus _status;
-    int _active, _stopping;
+    int _active, _stopping, _disposed, _enabled;
     Thread _monitor;
     public IdleSearchStatus Status => Volatile.Read(ref _status);
     public bool Stopping => Volatile.Read(ref _stopping) != 0;
+    public bool Enabled => Volatile.Read(ref _enabled) != 0;
 
-    public IdleSearchGovernor(int maxWorkers, ICpuLoadSource source = null)
+    public IdleSearchGovernor(int maxWorkers, ICpuLoadSource source = null, SearchRuntimeControl control = null)
     {
         int limit = Math.Clamp(maxWorkers, 1, Environment.ProcessorCount);
         _source = source ?? new WindowsCpuLoadSource();
         _policy = new(Environment.ProcessorCount, limit);
         _priority = new();
-        _status = new(limit, 1, 0.20, null, false, _priority.Applied, "正在采样");
+        _control = control ?? new SearchRuntimeControl(true);
+        _workerLimit = limit;
+        _control.Changed += SetEnabled;
+        SetEnabled(_control.IdleSearch);
     }
 
     internal void Sample()
     {
+        if (!Enabled) return;
         var previous = Status;
+        if (previous == null || !Enabled) return;
         if (_source.TrySample(out double external, out string detail) && double.IsFinite(external))
         {
+            if (!Enabled) return;
             var (workers, duty) = _policy.Update(external);
             Volatile.Write(ref _status, new(previous.WorkerLimit, workers, duty,
                 Math.Clamp(external, 0, 1) * 100, true, _priority.Applied, ""));
@@ -132,6 +158,25 @@ internal sealed class IdleSearchGovernor : IDisposable
     public void RequestStop() { Volatile.Write(ref _stopping, 1); Wake(); }
     void Wake() { lock (_gate) Monitor.PulseAll(_gate); }
 
+    void SetEnabled(bool enabled)
+    {
+        if (Volatile.Read(ref _disposed) != 0 && enabled) return;
+        if (enabled)
+        {
+            if (Interlocked.Exchange(ref _enabled, 1) != 0) return;
+            _policy.Reset();
+            _priority.Enable();
+            Volatile.Write(ref _status, new IdleSearchStatus(_workerLimit, 1, 0.20, null, false, _priority.Applied, "正在采样"));
+        }
+        else
+        {
+            if (Interlocked.Exchange(ref _enabled, 0) == 0) return;
+            _priority.Disable();
+            Volatile.Write(ref _status, null);
+        }
+        Wake();
+    }
+
     public void Start(CancellationToken ct)
     {
         if (_monitor != null) return;
@@ -141,8 +186,8 @@ internal sealed class IdleSearchGovernor : IDisposable
             {
                 while (!ct.IsCancellationRequested && !Stopping)
                 {
-                    if (ct.WaitHandle.WaitOne(1000)) break;
-                    Sample();
+                    if (ct.WaitHandle.WaitOne(Enabled ? 1000 : 100)) break;
+                    if (Enabled) Sample();
                 }
             }
             catch (ObjectDisposedException) { }
@@ -165,7 +210,9 @@ internal sealed class IdleSearchGovernor : IDisposable
             {
                 ct.ThrowIfCancellationRequested();
                 if (owner.Stopping || shouldStop()) { Release(); return false; }
+                if (!owner.Enabled) { Release(); return true; }
                 var budget = owner.Status;
+                if (budget == null || !owner.Enabled) { Release(); return true; }
                 long now = Stopwatch.GetTimestamp();
                 long phase = (now - owner._origin) % PeriodTicks;
                 long workTicks = (long)(PeriodTicks * budget.DutyCycle);
@@ -197,7 +244,10 @@ internal sealed class IdleSearchGovernor : IDisposable
 
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        _control.Changed -= SetEnabled;
         RequestStop();
+        SetEnabled(false);
         try { _monitor?.Join(1500); } catch (ThreadStateException) { }
         _source.Dispose(); _priority.Dispose();
     }
@@ -209,38 +259,42 @@ internal sealed class BackgroundPriorityScope : IDisposable
     static readonly object Gate = new();
     static int _owners;
     static ProcessPriorityClass _original;
-    static bool _changed, _applied;
-    bool _registered;
-    public bool Applied { get; }
+    static bool _changed, _globalApplied;
+    int _registered, _applied;
+    public bool Applied => Volatile.Read(ref _applied) != 0;
 
-    public BackgroundPriorityScope()
+    public void Enable()
     {
         if (!OperatingSystem.IsWindows()) return;
         lock (Gate)
         {
+            if (Volatile.Read(ref _registered) != 0) return;
             if (_owners == 0)
             {
-                _applied = _changed = false;
+                _globalApplied = _changed = false;
                 try
                 {
                     using var process = Process.GetCurrentProcess();
                     _original = process.PriorityClass;
                     if (_original is not (ProcessPriorityClass.Idle or ProcessPriorityClass.BelowNormal))
                     { process.PriorityClass = ProcessPriorityClass.BelowNormal; _changed = true; }
-                    _applied = true;
+                    _globalApplied = true;
                 }
                 catch (Exception error) when (error is System.ComponentModel.Win32Exception or InvalidOperationException or NotSupportedException) { }
             }
-            _owners++; _registered = true; Applied = _applied;
+            _owners++;
+            Volatile.Write(ref _registered, 1);
+            Volatile.Write(ref _applied, _globalApplied ? 1 : 0);
         }
     }
 
-    public void Dispose()
+    public void Disable()
     {
         lock (Gate)
         {
-            if (!_registered) return;
-            _registered = false;
+            if (Volatile.Read(ref _registered) == 0) return;
+            Volatile.Write(ref _registered, 0);
+            Volatile.Write(ref _applied, 0);
             if (--_owners == 0 && _changed)
             {
                 try
@@ -252,4 +306,6 @@ internal sealed class BackgroundPriorityScope : IDisposable
             }
         }
     }
+
+    public void Dispose() => Disable();
 }

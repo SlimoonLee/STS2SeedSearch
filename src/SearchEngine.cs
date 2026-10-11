@@ -69,10 +69,12 @@ public static class SearchEngine
     }
 
     public static SearchResult Run(SearchConfig config, Action<Hit> onHit = null,
-        Action<SearchProgress> onProgress = null, CancellationToken ct = default)
+        Action<SearchProgress> onProgress = null, CancellationToken ct = default, SearchRuntimeControl runtime = null)
     {
         var cfg = config.ValidatedCopy();
         ct.ThrowIfCancellationRequested();
+        runtime ??= new SearchRuntimeControl();
+        runtime.SetIdleSearch(cfg.idleSearch);
         string output = Path.GetFullPath(cfg.outFile);
         Directory.CreateDirectory(Path.GetDirectoryName(output));
         FileStream outputLock;
@@ -85,12 +87,12 @@ public static class SearchEngine
         }
         using (outputLock)
         {
-            return RunLocked(cfg, onHit, onProgress, ct, output);
+            return RunLocked(cfg, onHit, onProgress, ct, output, runtime);
         }
     }
 
     static SearchResult RunLocked(SearchConfig cfg, Action<Hit> onHit, Action<SearchProgress> onProgress,
-        CancellationToken ct, string output)
+        CancellationToken ct, string output, SearchRuntimeControl runtime)
     {
         var evaluator = new SeedEvaluator(cfg);
         bool randomMode = cfg.seedListFile.Length == 0;
@@ -155,8 +157,8 @@ public static class SearchEngine
             MaxDegreeOfParallelism = cfg.threads == 0 ? Environment.ProcessorCount : cfg.threads,
             CancellationToken = ct
         };
-        using var idleGovernor = cfg.idleSearch ? new IdleSearchGovernor(options.MaxDegreeOfParallelism) : null;
-        idleGovernor?.Start(ct);
+        using var idleGovernor = new IdleSearchGovernor(options.MaxDegreeOfParallelism, control: runtime);
+        idleGovernor.Start(ct);
         long? total = randomMode && !cfg.findUntilHit
             ? (long)((end - cfg.startIndex) - tracker.CompletedCandidates) : null;
         SearchProgress Snapshot() => new(Volatile.Read(ref evaluated), Volatile.Read(ref hits), total, clock.Elapsed, totals.Snapshot())
