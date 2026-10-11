@@ -71,6 +71,7 @@ foreach (var entry in expected)
 Console.WriteLine($"PASS: {expected.Count} generator fixtures (maps, edges, queues, Neow, rewards, relics, unknown rolls).");
 NeowReplayTests.Run(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(args[0])), "neow-engine-v0.111.0.json"));
 NeowFilterTests.Run();
+RelicFilterTests.Run();
 EncounterFilterTests.Run();
 RegressionTests.Run(Path.GetFullPath(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(args[0])), "../..")));
 MapModeTests.Run();

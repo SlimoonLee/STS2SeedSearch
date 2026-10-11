@@ -22,6 +22,8 @@ public sealed class SearchConfig
     public string[] neowCurses { get; set; } = [];
     public int unknownMonsterStreak { get; set; }
     public string[] allowedCards { get; set; } = [];
+    // 只检查遗物袋实际取出的物品：捏奥选项本身不属于此白名单。
+    public string[] allowedRelics { get; set; } = [];
     public int minFightsChecked { get; set; } = 3;
     public string routeMode { get; set; } = "all";
     public bool checkFromFirstUnknown { get; set; } = true;
@@ -107,6 +109,7 @@ public sealed class SearchConfig
             .Any(pair => pair.All(cfg.neowPositives.Contains))) throw new ArgumentException("所选两个正面遗物互斥，无法同时出现，请增加其他正面选项。");
         cfg.neowCurses = Normalize(neowCurses, GameData.NeowCurse, "捏奥诅咒");
         cfg.allowedCards = Normalize(allowedCards, Game.FilterableCards(cfg.character), "单人可筛选卡牌");
+        cfg.allowedRelics = Normalize(allowedRelics, RelicBag.SequenceRelicIds(cfg.character), "遗物序列");
         if (neowChoice == 2 && cfg.allowedCards.Length > 0 && cfg.neowCurses.Length > 0 && cfg.neowCurses.All(NeowEffects.HasUnmodeledCascade))
             throw new ArgumentException("所选诅咒均为尚未完整重放的连锁遗物，无法确认卡牌白名单。请选择其他诅咒，或更改实际选择的捏奥项。");
         cfg.seedListFile = (seedListFile ?? "").Trim();

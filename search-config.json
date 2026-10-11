@@ -73,6 +73,7 @@
     "Untouchable",
     "WellLaidPlans"
   ],
+  "allowedRelics": [],
   "minFightsChecked": 5,
   "routeMode": "all",
   "checkFromFirstUnknown": true,

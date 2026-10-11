@@ -54,6 +54,17 @@ public sealed class RelicBag
 {
     Dictionary<string, List<string>> _buckets = new();
     readonly List<string> _order = new();
+    static readonly string[] PullOrder = ["Shop", "Common", "Uncommon", "Rare"];
+
+    /// <summary>遗物序列实际可取的候选；捏奥专属/事件/远古遗物不在这里。</summary>
+    public static string[] SequenceRelicIds(string character)
+    {
+        var pools = GameData.RelicPools["SharedRelicPool"]
+            .Concat(GameData.RelicPools.TryGetValue(character + "RelicPool", out var cp) ? cp : Array.Empty<string>());
+        return pools.Where(r => GameData.RelicRarity.TryGetValue(r, out var rr)
+                && rr is "Common" or "Uncommon" or "Rare" or "Shop")
+            .Distinct(StringComparer.Ordinal).ToArray();
+    }
 
     public RelicBag DeepClone()
     {
@@ -64,12 +75,9 @@ public sealed class RelicBag
 
     public RelicBag(string character)
     {
-        var pools = GameData.RelicPools["SharedRelicPool"]
-            .Concat(GameData.RelicPools.TryGetValue(character + "RelicPool", out var cp) ? cp : Array.Empty<string>());
-        foreach (var r in pools)
+        foreach (var r in SequenceRelicIds(character))
         {
-            if (!GameData.RelicRarity.TryGetValue(r, out var rr)) continue;
-            if (rr is not ("Common" or "Uncommon" or "Rare" or "Shop")) continue;
+            string rr = GameData.RelicRarity[r];
             if (!_buckets.TryGetValue(rr, out var list)) { list = new(); _buckets[rr] = list; _order.Add(rr); }
             list.Add(r);
         }
@@ -84,9 +92,11 @@ public sealed class RelicBag
     {
         if (_buckets.TryGetValue(rarity, out var b) && b.Count > 0)
         { var r = b[0]; b.RemoveAt(0); return r; }
-        foreach (var rr in _order)
-            if (_buckets[rr].Count > 0)
-            { var r = _buckets[rr][0]; _buckets[rr].RemoveAt(0); return r; }
+        int start = Array.IndexOf(PullOrder, rarity);
+        if (start < 0) start = -1;
+        for (int i = start + 1; i < PullOrder.Length; i++)
+            if (_buckets.TryGetValue(PullOrder[i], out var fallback) && fallback.Count > 0)
+            { var r = fallback[0]; fallback.RemoveAt(0); return r; }
         return null;
     }
 }

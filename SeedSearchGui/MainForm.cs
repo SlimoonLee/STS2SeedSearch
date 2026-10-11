@@ -21,7 +21,7 @@ public sealed class MainForm : Form
         _noRestBeforeElite = new() { Text = "第一个精英前禁止火堆", AutoSize = true };
     readonly TextBox _input = new() { Dock = DockStyle.Fill, PlaceholderText = "留空则枚举新种子；支持 txt / jsonl" },
         _output = new() { Dock = DockStyle.Fill };
-    readonly SelectionPanel _positives = new(), _curses = new(), _bosses = new(), _cards = new(true), _strongs = new(), _firstElites = new();
+    readonly SelectionPanel _positives = new(), _curses = new(), _bosses = new(), _cards = new(true), _relics = new(), _strongs = new(), _firstElites = new();
     readonly Button _start = Button("开始搜索"), _stop = Button("停止"), _copy = Button("复制种子"), _open = Button("打开结果文件");
     readonly Label _summary = new() { Dock = DockStyle.Fill, AutoSize = true, ForeColor = Color.FromArgb(50, 75, 105), Padding = new Padding(8) },
         _status = new() { AutoSize = true, Text = "就绪", Margin = new Padding(12, 8, 0, 0) },
@@ -36,11 +36,12 @@ public sealed class MainForm : Form
     readonly System.Windows.Forms.Timer _timer = new() { Interval = 500 };
     readonly ConcurrentQueue<Hit> _pending = new();
     readonly Dictionary<string, string[]> _cardMemory = new(StringComparer.Ordinal);
+    readonly Dictionary<string, string[]> _relicMemory = new(StringComparer.Ordinal);
     readonly HashSet<string> _bossMemory = new(StringComparer.Ordinal);
     CancellationTokenSource _cts;
     Task<SearchResult> _task;
     SearchProgress _latest;
-    string _cardCharacter = "", _lastOutput = "", _automaticOutput, _continuationOutput;
+    string _cardCharacter = "", _relicCharacter = "", _lastOutput = "", _automaticOutput, _continuationOutput;
     int _queued;
     bool _loading = true, _closeRequested, _changingContinuation;
     const int DisplayLimit = 1000;
@@ -64,7 +65,7 @@ public sealed class MainForm : Form
             .Concat(new[] { "LavaRock", "SmallCapsule", "NutritiousOyster", "StoneHumidifier", "NeowsTalisman", "Pomander" }
                 .Select(r => new SelectionOption(r, Loc.Relic(r), "成对遗物"))));
         _curses.SetItems(GameData.NeowCurse.Select(r => new SelectionOption(r, Loc.Relic(r), "诅咒")));
-        PopulateCards(); PopulateBosses(); PopulateEncounters(); NewOutput();
+        PopulateCards(); PopulateRelics(); PopulateBosses(); PopulateEncounters(); NewOutput();
         WireEvents(); _loading = false; Summary();
         if (restorePreferences && File.Exists(PreferencesPath))
         {
@@ -139,6 +140,11 @@ public sealed class MainForm : Form
         neowLayout.Controls.Add(Note("实际选择（影响奖励重放）"), 0, 2); neowLayout.Controls.Add(_choice, 1, 2);
         neow.Controls.Add(neowLayout); _filters.TabPages.Add(neow);
         AddTab("卡牌白名单", _cards); AddTab("Boss 白名单", _bosses);
+        var relicPage = new TabPage("遗物白名单");
+        var relicLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Padding = new Padding(6) };
+        relicLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize)); relicLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        relicLayout.Controls.Add(Note("只检查遗物序列实际取出的遗物：选中的捏奥遗物本身不计入；选择小型扭蛋或巨大扭蛋时，只检查它们从遗物袋取出的遗物，以及路线上的首个精英遗物。空=不限。"), 0, 0);
+        relicLayout.Controls.Add(_relics, 0, 1); relicPage.Controls.Add(relicLayout); _filters.TabPages.Add(relicPage);
         var encounters = new TabPage("遭遇条件") { AutoScroll = true };
         var encounterLayout = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
             ColumnCount = 1, RowCount = 4, Padding = new Padding(6) };
@@ -212,7 +218,7 @@ public sealed class MainForm : Form
 
     void WireEvents()
     {
-        _character.SelectedIndexChanged += (_, _) => { if (!_loading) { InvalidateContinuation(); PopulateCards(); Summary(); } };
+        _character.SelectedIndexChanged += (_, _) => { if (!_loading) { InvalidateContinuation(); PopulateCards(); PopulateRelics(); Summary(); } };
         _act.SelectedIndexChanged += (_, _) => { if (!_loading) { InvalidateContinuation(); PopulateBosses(); PopulateEncounters(); Summary(); } };
         _mode.SelectedIndexChanged += (_, _) => { InvalidateContinuation(); Summary(); };
         _mapMode.SelectedIndexChanged += (_, _) => { InvalidateContinuation(); Summary(); };
@@ -221,7 +227,7 @@ public sealed class MainForm : Form
         _continueLast.CheckedChanged += (_, _) => ContinuationChanged();
         _unlocked.CheckedChanged += (_, _) => { InvalidateContinuation(); Summary(); };
         _discovered.CheckedChanged += (_, _) => { InvalidateContinuation(); Summary(); };
-        foreach (var list in new[] { _positives, _curses, _bosses, _cards, _strongs, _firstElites }) list.SelectionChanged += (_, _) => { InvalidateContinuation(); Summary(); };
+        foreach (var list in new[] { _positives, _curses, _bosses, _cards, _relics, _strongs, _firstElites }) list.SelectionChanged += (_, _) => { InvalidateContinuation(); Summary(); };
         foreach (var number in new[] { _asc, _fights, _unknowns, _lastFloor, _strongPrefix, _count, _rng, _offset }) number.ValueChanged += (_, _) => { InvalidateContinuation(); Summary(); };
         _eliteBlock.CheckedChanged += (_, _) => { InvalidateContinuation(); Summary(); };
         _noRestBeforeElite.CheckedChanged += (_, _) => { InvalidateContinuation(); Summary(); };
@@ -254,6 +260,21 @@ public sealed class MainForm : Form
             .ThenBy(Source, StringComparer.Ordinal).ThenBy(c => Order(GameData.CardRarity[c])).ThenBy(Loc.Card, StringComparer.Ordinal)
             .Select(c => new SelectionOption(c, Loc.Card(c), Loc.RarityCn(GameData.CardRarity[c]), Source(c), primary.Contains(c))), selected);
     }
+    void PopulateRelics()
+    {
+        if (_relicCharacter.Length > 0) _relicMemory[_relicCharacter] = _relics.CheckedIds();
+        string character = Character;
+        string[] selected = _relicMemory.GetValueOrDefault(character) ?? [];
+        var primary = GameData.RelicPools.GetValueOrDefault(character + "RelicPool", [])!.ToHashSet(StringComparer.Ordinal);
+        int Order(string rarity) => rarity switch { "Common" => 0, "Uncommon" => 1, "Rare" => 2, "Shop" => 3, _ => 4 };
+        _relics.SetItems(RelicBag.SequenceRelicIds(character)
+            .OrderBy(r => primary.Contains(r) ? 0 : 1)
+            .ThenBy(r => Order(GameData.RelicRarity[r]))
+            .ThenBy(Loc.Relic, StringComparer.Ordinal)
+            .Select(r => new SelectionOption(r, Loc.Relic(r), Loc.RarityCn(GameData.RelicRarity[r]), primary.Contains(r) ? "本职业" : "共享", primary.Contains(r))), selected);
+        _relicCharacter = character;
+        _relicMemory[character] = _relics.CheckedIds();
+    }
     void PopulateBosses()
     {
         foreach (string id in _bosses.OptionIds) _bossMemory.Remove(id);
@@ -283,7 +304,7 @@ public sealed class MainForm : Form
         _fromUnknown.Enabled = _mode.SelectedIndex == 1;
         _discovered.Enabled = _unlocked.Checked;
         _count.Enabled = !_untilFound.Checked;
-        _summary.Text = $"{Loc.Characters[_character.SelectedIndex].Cn} · A{_asc.Value} · {Loc.Acts[_act.SelectedIndex].Cn} · Boss {_bosses.CheckedIds().Length} 项 · 强怪 {_strongs.CheckedIds().Length}/{_strongPrefix.Value} · 首精英 {_firstElites.CheckedIds().Length} 项 · 堵路 {_eliteBlock.Checked} · 禁火 {_noRestBeforeElite.Checked} · 捏奥 {_positives.CheckedIds().Length}+{_curses.CheckedIds().Length} 项 · 卡牌 {_cards.CheckedIds().Length} 项   |   "
+        _summary.Text = $"{Loc.Characters[_character.SelectedIndex].Cn} · A{_asc.Value} · {Loc.Acts[_act.SelectedIndex].Cn} · Boss {_bosses.CheckedIds().Length} 项 · 强怪 {_strongs.CheckedIds().Length}/{_strongPrefix.Value} · 首精英 {_firstElites.CheckedIds().Length} 项 · 堵路 {_eliteBlock.Checked} · 禁火 {_noRestBeforeElite.Checked} · 捏奥 {_positives.CheckedIds().Length}+{_curses.CheckedIds().Length} 项 · 卡牌 {_cards.CheckedIds().Length} 项 · 遗物序列 {_relics.CheckedIds().Length} 项   |   "
             + (_fights.Value == 0 && _unknowns.Value == 0 ? "仅筛开局（不建图）" : $"前 {_lastFloor.Value} 层 · {(_mapMode.SelectedIndex == 0 ? "简图" : "全图")} · {(_mode.SelectedIndex == 0 ? "全部路线" : "存在路线")} · 检查 {_fights.Value} 场 · 前 {_unknowns.Value} 个 ? 出怪")
             + (_untilFound.Checked ? " · 找到一个即停" : "") + (_continueLast.Checked ? " · 从上次继续" : _resume.Checked ? " · 自动续跑" : "");
         if (_latest != null && _task is { IsCompleted: true }) _status.Text = "条件已修改 · 当前显示上次搜索结果";
@@ -298,7 +319,7 @@ public sealed class MainForm : Form
         neowChoice = _choice.SelectedIndex - 1, routeMode = _mode.SelectedIndex == 0 ? "all" : "exists",
         minFightsChecked = (int)_fights.Value, unknownMonsterStreak = (int)_unknowns.Value, checkFromFirstUnknown = _fromUnknown.Checked,
         mapMode = _mapMode.SelectedIndex == 0 ? "search" : "full", maxSearchFloor = (int)_lastFloor.Value,
-        allowedCards = _cards.CheckedIds(), findUntilHit = _untilFound.Checked, resumeFromCheckpoint = _resume.Checked, count = (int)_count.Value, rngSeed = (ulong)_rng.Value, startIndex = (ulong)_offset.Value,
+        allowedCards = _cards.CheckedIds(), allowedRelics = _relics.CheckedIds(), findUntilHit = _untilFound.Checked, resumeFromCheckpoint = _resume.Checked, count = (int)_count.Value, rngSeed = (ulong)_rng.Value, startIndex = (ulong)_offset.Value,
         threads = (int)_threads.Value, checkpointIntervalSeconds = (int)_checkpointInterval.Value, outFile = _output.Text, seedListFile = _input.Text
     }.ValidatedCopy();
 
@@ -308,7 +329,7 @@ public sealed class MainForm : Form
         try
         {
             _continuationOutput = null; _continueLast.Checked = false; _continueLast.Enabled = false;
-            _cardCharacter = ""; _cardMemory.Clear(); _bossMemory.Clear();
+            _cardCharacter = ""; _relicCharacter = ""; _cardMemory.Clear(); _relicMemory.Clear(); _bossMemory.Clear();
             _character.SelectedIndex = Array.FindIndex(Loc.Characters, c => c.Id == cfg.character);
             _act.SelectedIndex = Array.FindIndex(Loc.Acts, a => a.Id == cfg.act1);
             _asc.Value = cfg.ascension; _unlocked.Checked = cfg.underdocksUnlocked; _discovered.Checked = cfg.underdocksDiscovered;
@@ -318,7 +339,7 @@ public sealed class MainForm : Form
             _untilFound.Checked = cfg.findUntilHit; _resume.Checked = cfg.resumeFromCheckpoint; _count.Value = Math.Clamp(cfg.count, 1, int.MaxValue);
             _rng.Value = cfg.rngSeed; _offset.Value = cfg.startIndex; _threads.Value = cfg.threads; _checkpointInterval.Value = cfg.checkpointIntervalSeconds;
             _input.Text = cfg.seedListFile; _output.Text = cfg.outFile;
-            PopulateCards(); _cards.SelectIds(cfg.allowedCards); PopulateBosses(); _bosses.SelectIds(cfg.bossAllow); PopulateEncounters();
+            PopulateCards(); _cards.SelectIds(cfg.allowedCards); PopulateRelics(); _relics.SelectIds(cfg.allowedRelics); PopulateBosses(); _bosses.SelectIds(cfg.bossAllow); PopulateEncounters();
             _strongPrefix.Value = cfg.normalStrongPrefixLength; _strongs.SelectIds(cfg.normalStrongAllow); _firstElites.SelectIds(cfg.firstEliteAllow); _eliteBlock.Checked = cfg.eliteBlock; _noRestBeforeElite.Checked = cfg.noRestBeforeFirstElite;
             _positives.SelectIds(cfg.neowPositives); _curses.SelectIds(cfg.neowCurses);
         }
@@ -523,8 +544,10 @@ public sealed class MainForm : Form
                 }
             }
             if (hit.neow.potions.Length > 0) text.Append("开局药水：" + string.Join(" / ", hit.neow.potions) + "\r\n");
+            if (hit.neow.relics is { Length: > 0 }) text.Append("捏奥效果取出的遗物（序列白名单检查）：" + string.Join(" / ", hit.neow.relics.Select(Loc.Relic)) + "\r\n");
             if (!hit.neow.exact) text.Append("连锁遗物效果尚未完整重放；启用卡牌白名单时此类种子不通过。\r\n");
         }
+        if (hit.firstEliteRelic is { Length: > 0 }) text.Append($"\r\n首个精英实际遗物（序列白名单检查）：{Loc.Relic(hit.firstEliteRelic)} ({hit.firstEliteRelic})\r\n");
         for (int i = 0; i < hit.fights.Length; i++)
         {
             var fight = hit.fights[i]; text.Append($"\r\n第 {i + 1} 场 · {Loc.Encounter(fight.encounter)} · {fight.gold} 金币\r\n");
@@ -574,6 +597,15 @@ public sealed class MainForm : Form
             || !_strongs.VisibleNames.Any(name => name.Contains("邪教徒") || name.Contains("CalcifiedCultist"))
             || _strongs.VisibleCount == 0 || _firstElites.VisibleCount == 0)
             throw new Exception("遭遇条件控件或配置往返未保留。");
+    }
+
+    internal void VerifyRelicControls()
+    {
+        var ids = _relics.OptionIds.ToHashSet(StringComparer.Ordinal);
+        var cfg = ReadConfig();
+        if (!ids.Contains("Anchor") || ids.Contains("SmallCapsule") || ids.Contains("LargeCapsule") || ids.Contains("NeowsBones")
+            || cfg.allowedRelics.Length != 0 || _relics.VisibleCount == 0)
+            throw new Exception("遗物序列白名单控件包含捏奥专属遗物或配置往返错误。");
     }
 
     internal void VerifyNeowDetails(Hit hit)

@@ -39,6 +39,7 @@ static class Program
                     findUntilHit = true, count = 300, threads = 4, rngSeed = ulong.MaxValue, startIndex = 12345, outFile = Path.Combine(Path.GetTempPath(), "gui-test.jsonl") };
                 form.ApplyConfig(cfg);
                 form.VerifyEncounterControls();
+                form.VerifyRelicControls();
                 if (JsonSerializer.Serialize(cfg.ValidatedCopy()) != JsonSerializer.Serialize(form.ReadConfig())) throw new Exception("配置往返丢失条件。");
                 string deliveryPath = Path.Combine(Path.GetTempPath(), "gui-delivery-" + Guid.NewGuid().ToString("N") + ".jsonl");
                 string firstPath = Path.Combine(Path.GetTempPath(), "gui-first-" + Guid.NewGuid().ToString("N") + ".jsonl");

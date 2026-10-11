@@ -25,7 +25,7 @@ public static class NeowEffects
         "HeftyTablet"     => new(3, 0, 0, 0, 0),                   // 3 稀有 Uniform 选1 + Injury(无RNG)
         "NewLeaf"         => new(0, Niche: 1, 0, 0, 0),            // 玩家选 1 张变形（Niche）
         "LeafyPoultice"   => new(0, 0, Transformations: 2, 0, 0),  // 起始打击+防御变形（Transformations）
-        "NeowsBones"      => new(27, Niche: 1, 0, 0, 0),           // 28 项池(30-MassiveScroll-自身)洗牌 27 抽 + 1 诅咒(Niche)；二选一级联其遗物表
+        "NeowsBones"      => new(27, Niche: 1, 0, 0, 0),           // 28 项捏奥候选洗牌 27 抽 + 1 诅咒(Niche)；候选不从遗物袋取件
         _ => new(0, 0, 0, 0, 0),                                   // 金币/HP/升级/被动/移除/加固定牌类：零消耗
     };
 

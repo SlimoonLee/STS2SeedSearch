@@ -35,6 +35,8 @@
     "Predator", "Outbreak", "Survivor", "Slice", "Expertise",
     "LegSweep", "DeadlyPoison", "SuckerPunch", "PoisonedStab", "Neutralize"
   ],
+  "allowedRelics": [],              // 遗物序列白名单；只检查扭蛋袋取件和首个精英实际遗物
+                                    // 不写捏奥选项本身；空=不限
   "findUntilHit": false,            // true=不限制数量，直到找到一个符合条件的种子；可手动停止
   "resumeFromCheckpoint": true,     // 检测到同一输出/条件的检查点时继续；false=忽略检查点并从头开始
   "count": 500000,                  // 随机枚举种子数；findUntilHit=true 时忽略

@@ -1,7 +1,8 @@
 namespace SeedSearch;
 
 public sealed record NeowCardReport(string card, string kind, int group = 0, string from = "");
-public sealed record NeowEffectReport(string relic, NeowCardReport[] cards, string[] potions, bool exact = true)
+public sealed record NeowEffectReport(string relic, NeowCardReport[] cards, string[] potions, bool exact = true,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string[] relics = null)
 {
     // 固定诅咒只展示；其余奖励候选、整组卡牌与变形结果均须在白名单内。
     [System.Text.Json.Serialization.JsonIgnore]
@@ -15,6 +16,7 @@ public sealed partial class RewardsReplay
     {
         var cards = new List<NeowCardReport>();
         var potions = new List<string>();
+        List<string> relics = null;
         switch (relic)
         {
             case "ArcaneScroll":
@@ -57,6 +59,13 @@ public sealed partial class RewardsReplay
                 string[] leafPool = TransformPool();
                 cards.Add(new(leafPool[_niche.NextItem(leafPool.Length)], "transform", 0, "StartingBasic"));
                 break;
+            case "SmallCapsule":
+                PullSequenceRelic();
+                break;
+            case "LargeCapsule":
+                PullSequenceRelic();
+                PullSequenceRelic();
+                break;
             case "LeadPaperweight":
                 Add(NonCombatCards(GameData.CardPools["ColorlessCardPool"].Where(c => !GameData.CardMultiplayerOnly.Contains(c)).ToArray(), 2), "offer", 1);
                 break;
@@ -77,17 +86,23 @@ public sealed partial class RewardsReplay
                 for (int i = 0; i < consumption.Transformations; i++) _transf.NextDouble();
                 for (int i = 0; i < consumption.PotionGen; i++) _potGen.NextDouble();
                 for (int i = 0; i < consumption.BagPulls; i++)
-                {
-                    float roll = _rew.NextFloat();
-                    bag.Pull(roll < 0.5f ? "Common" : roll < 0.83f ? "Uncommon" : "Rare");
-                }
+                    PullSequenceRelic();
                 break;
         }
-        return new(relic, cards.ToArray(), potions.ToArray(), exact: !NeowEffects.HasUnmodeledCascade(relic));
+        return new(relic, cards.ToArray(), potions.ToArray(), exact: !NeowEffects.HasUnmodeledCascade(relic), relics?.ToArray());
 
         void Add(IEnumerable<string> generated, string kind, int group = 0)
         {
             foreach (string card in generated) cards.Add(new(card, kind, group));
+        }
+
+        string PullSequenceRelic()
+        {
+            float roll = _rew.NextFloat();
+            string rarity = roll < 0.5f ? "Common" : roll < 0.83f ? "Uncommon" : "Rare";
+            string pulled = bag?.Pull(rarity) ?? "(袋空)";
+            (relics ??= new()).Add(pulled);
+            return pulled;
         }
     }
 

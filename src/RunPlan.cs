@@ -7,7 +7,8 @@ public sealed record Hit(string seed, string act1, string boss, string ancient,
     FightReport[] fights, int checkedFights, string[] treasures,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] NeowEffectReport neow = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string[] normalQueue = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string[] eliteQueue = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string[] eliteQueue = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string firstEliteRelic = null);
 public sealed record FightReport(string encounter, int gold, string potion, string[] cards, string eliteRelic);
 
 public static class RunPlan
@@ -21,7 +22,7 @@ public static class RunPlan
 public sealed class SeedEvaluator
 {
     readonly SearchConfig _cfg;
-    readonly HashSet<string> _positives, _curses, _bosses, _normalStrong, _firstElite, _allowed;
+    readonly HashSet<string> _positives, _curses, _bosses, _normalStrong, _firstElite, _allowed, _allowedRelics;
     public SeedEvaluator(SearchConfig cfg)
     {
         _cfg = cfg.ValidatedCopy();
@@ -31,6 +32,7 @@ public sealed class SeedEvaluator
         _normalStrong = new(_cfg.normalStrongAllow, StringComparer.Ordinal);
         _firstElite = new(_cfg.firstEliteAllow, StringComparer.Ordinal);
         _allowed = new(_cfg.allowedCards, StringComparer.Ordinal);
+        _allowedRelics = new(_cfg.allowedRelics, StringComparer.Ordinal);
     }
 
     public Hit Evaluate(string seed, SearchCounters stats = null, CancellationToken ct = default)
@@ -66,7 +68,8 @@ public sealed class SeedEvaluator
         // 先用与完整队列相同的 RNG 计算摘要。只要条件未通过，就不创建完整遭遇列表，
         // 也不进入奖励/地图重放；完整队列只在奖励预筛通过后为命中候选生成。
         bool queueFiltered = _bosses.Count > 0 || _normalStrong.Count > 0 || _firstElite.Count > 0;
-        bool needsMap = _cfg.minFightsChecked > 0 || _cfg.unknownMonsterStreak > 0 || _cfg.eliteBlock || _cfg.noRestBeforeFirstElite;
+        bool needsFirstEliteRelic = _allowedRelics.Count > 0;
+        bool needsMap = _cfg.minFightsChecked > 0 || _cfg.unknownMonsterStreak > 0 || _cfg.eliteBlock || _cfg.noRestBeforeFirstElite || needsFirstEliteRelic;
         int guaranteed = _cfg.routeMode == "all" ? Math.Min(5, _cfg.minFightsChecked)
             : !_cfg.checkFromFirstUnknown && _cfg.minFightsChecked > 0 ? 1 : 0;
         bool deferQueueStages = !queueFiltered && _allowed.Count > 0 && guaranteed > 0;
@@ -96,11 +99,12 @@ public sealed class SeedEvaluator
         }
 
         // 捏奥只执行一次。额外卡牌独立于战斗数 X，固定诅咒不参与白名单。
-        RewardsReplay initialRewards = _cfg.minFightsChecked > 0 || _cfg.neowChoice >= 0
+        RewardsReplay initialRewards = _cfg.minFightsChecked > 0 || _cfg.neowChoice >= 0 || needsFirstEliteRelic
             ? new RewardsReplay(hash, _cfg.character, _cfg.ascension) : null;
         NeowEffectReport neow = _cfg.neowChoice < 0 ? null
             : initialRewards.ApplyNeowEffect(_cfg.neowChoice switch { 0 => a, 1 => b, _ => c }, bag);
         if (_allowed.Count > 0 && neow != null && (!neow.exact || neow.FilteredCards.Any(card => !_allowed.Contains(card)))) return null;
+        if (_allowedRelics.Count > 0 && neow?.relics != null && neow.relics.Any(relic => !_allowedRelics.Contains(relic))) return null;
 
         if (_allowed.Count > 0 && guaranteed > 0)
         {
@@ -167,36 +171,16 @@ public sealed class SeedEvaluator
                 state.Route.Add(node);
 
                 // The cutoff applies to rewards, unknown rolls, and the first-X
-                // route conditions.  A no-rest-before-first-elite check may
-                // continue past it only to inspect static map nodes until the
-                // first elite (or Boss); it must not expand the whitelist scope.
-                if (state.Depth > _cfg.maxSearchFloor)
-                {
-                    if (!_cfg.noRestBeforeFirstElite || state.EliteSeen
-                        || state.Checked < _cfg.minFightsChecked
-                        || state.Unknowns < _cfg.unknownMonsterStreak)
-                        return false;
-                    if (node.PointType == MapPointType.RestSite) return false;
-                    if (node.PointType == MapPointType.Elite) state.EliteSeen = true;
-                    if (state.EliteSeen || ReferenceEquals(node, map.BossMapPoint))
-                    {
-                        firstPass ??= state;
-                        return true;
-                    }
-                    if (node.Children.Count == 0) return false;
-                    bool postFloorAny = false;
-                    foreach (var child in node.Children)
-                    {
-                        bool pass = Visit(child, state.DeepClone(), requireAll, ref firstPass);
-                        if (requireAll && !pass) return false;
-                        if (!requireAll && pass) return true;
-                        postFloorAny |= pass;
-                    }
-                    return postFloorAny;
-                }
-
+                // route conditions.  A first-elite relic condition may continue
+                // past it to replay exactly that elite reward; no other reward or
+                // unknown roll is expanded outside the requested prefix.
+                bool pastFloor = state.Depth > _cfg.maxSearchFloor;
+                bool mustContinueToFirstElite = (_cfg.noRestBeforeFirstElite && !state.EliteSeen)
+                    || (needsFirstEliteRelic && !state.FirstEliteRelicChecked);
+                if (pastFloor && (state.Checked < _cfg.minFightsChecked || state.Unknowns < _cfg.unknownMonsterStreak)) return false;
+                if (pastFloor && _cfg.noRestBeforeFirstElite && node.PointType == MapPointType.RestSite && !state.EliteSeen) return false;
                 string type = node.PointType.ToString();
-                if (node.PointType == MapPointType.Unknown)
+                if (!pastFloor && node.PointType == MapPointType.Unknown)
                 {
                     if (_cfg.checkFromFirstUnknown) state.Checking = true;
                     type = state.Odds.Roll();
@@ -209,35 +193,53 @@ public sealed class SeedEvaluator
                 bool fight = type is "Monster" or "Elite";
                 if (requireAll && state.Depth <= _cfg.minFightsChecked && !fight) return false;
                 bool stillChecking = state.Checked < _cfg.minFightsChecked;
-                if (fight && stillChecking)
+                bool firstElite = needsFirstEliteRelic && type == "Elite" && !state.FirstEliteRelicChecked;
+                bool replayFight = fight && !state.Truncated && (stillChecking || firstElite);
+                if (replayFight)
                 {
-                    if (state.Truncated) return false;
                     bool elite = type == "Elite";
                     var reward = state.Rewards.Fight(elite, 0);
-                    if (state.Checking)
+                    if (state.Checking && stillChecking)
                     {
                         if (!CardsAllowed(reward)) return false;
                         state.Checked++;
                     }
-                    string encounter = elite ? rooms.Elite[state.Elite++ % rooms.Elite.Count]
-                        : rooms.Normal[state.Normal++ % rooms.Normal.Count];
-                    state.Fights.Add(new FightReport(Game.Snake(encounter), reward.Gold, reward.Potion ?? "",
-                        reward.Cards.Select(p => p.Name).ToArray(), reward.EliteRelic == null ? "" : state.Bag.Pull(reward.EliteRelic) ?? "(袋空)"));
+                    if (firstElite)
+                    {
+                        string actualRelic = reward.EliteRelic == null ? "" : state.Bag.Pull(reward.EliteRelic) ?? "(袋空)";
+                        state.FirstEliteRelic = actualRelic;
+                        state.FirstEliteRelicChecked = true;
+                        if (_allowedRelics.Count > 0 && !_allowedRelics.Contains(actualRelic)) return false;
+                    }
+                    if (stillChecking)
+                    {
+                        string encounter = elite ? rooms.Elite[state.Elite++ % rooms.Elite.Count]
+                            : rooms.Normal[state.Normal++ % rooms.Normal.Count];
+                        state.Fights.Add(new FightReport(Game.Snake(encounter), reward.Gold, reward.Potion ?? "",
+                            reward.Cards.Select(p => p.Name).ToArray(), reward.EliteRelic == null ? "" : state.FirstEliteRelicChecked && firstElite
+                                ? state.FirstEliteRelic : reward.EliteRelic == null ? "" : state.Bag.Pull(reward.EliteRelic) ?? "(袋空)"));
+                    }
                 }
-                else if (type == "Treasure" && stillChecking && !state.Truncated)
+                else if (!pastFloor && type == "Treasure" && stillChecking && !state.Truncated)
                 {
                     var treasure = state.Rewards.Treasure();
                     state.Treasures.Add($"{treasure.gold}+{state.Bag.Pull(treasure.relicRarity)}");
                 }
                 else if (type is "Shop" or "Event") state.Truncated = true;
                 bool eliteConditionDone = !_cfg.noRestBeforeFirstElite || state.EliteSeen || ReferenceEquals(node, map.BossMapPoint);
-                if (state.Checked >= _cfg.minFightsChecked && state.Unknowns >= _cfg.unknownMonsterStreak && eliteConditionDone)
+                bool relicConditionDone = !needsFirstEliteRelic || state.FirstEliteRelicChecked;
+                if (state.Checked >= _cfg.minFightsChecked && state.Unknowns >= _cfg.unknownMonsterStreak
+                    && eliteConditionDone && relicConditionDone)
                 {
                     firstPass ??= state;
                     return true;
                 }
-                bool mustContinueToFirstElite = _cfg.noRestBeforeFirstElite && !state.EliteSeen;
-                if (state.Truncated && state.Checked < _cfg.minFightsChecked || node.Children.Count == 0 || state.Depth >= _cfg.maxSearchFloor && !mustContinueToFirstElite) return false;
+                // The legacy no-fire check can still inspect static nodes after
+                // the cutoff even if a shop/event already truncated rewards.
+                // A relic whitelist needs an exact reward stream, so it cannot
+                // cross that boundary before the first elite.
+                if ((!pastFloor && state.Truncated) || (pastFloor && needsFirstEliteRelic && state.Truncated)
+                    || node.Children.Count == 0 || pastFloor && !mustContinueToFirstElite) return false;
                 bool any = false;
                 foreach (var child in node.Children)
                 {
@@ -259,8 +261,9 @@ public sealed class SeedEvaluator
             rooms?.Ancient ?? summary?.Ancient ?? "", a, b, c,
             state?.Route.Select(node => $"{node.coord.row},{node.coord.col}:{node.PointType}").ToArray() ?? [], state?.Rolls.ToArray() ?? [], state?.Fights.ToArray() ?? [],
             state?.Checked ?? 0, state?.Treasures.ToArray() ?? [], neow,
-            _normalStrong.Count > 0 || _firstElite.Count > 0 || _cfg.eliteBlock ? rooms?.Normal.ToArray() : null,
-            _normalStrong.Count > 0 || _firstElite.Count > 0 || _cfg.eliteBlock ? rooms?.Elite.ToArray() : null);
+            _normalStrong.Count > 0 || _firstElite.Count > 0 || _cfg.eliteBlock || needsFirstEliteRelic ? rooms?.Normal.ToArray() : null,
+            _normalStrong.Count > 0 || _firstElite.Count > 0 || _cfg.eliteBlock || needsFirstEliteRelic ? rooms?.Elite.ToArray() : null,
+            state?.FirstEliteRelic);
         }
     }
 
@@ -275,13 +278,15 @@ public sealed class SeedEvaluator
         public List<string> Rolls = [], Treasures = [];
         public List<FightReport> Fights = [];
         public int Depth, Unknowns, Checked, Normal, Elite;
-        public bool Checking, Truncated, EliteSeen;
+        public bool Checking, Truncated, EliteSeen, FirstEliteRelicChecked;
+        public string FirstEliteRelic;
         public WalkState DeepClone() => new()
         {
             Rewards = Rewards.DeepClone(), Bag = Bag.DeepClone(), Odds = Odds.DeepClone(),
             Route = new(Route), Rolls = new(Rolls), Treasures = new(Treasures), Fights = new(Fights),
             Depth = Depth, Unknowns = Unknowns, Checked = Checked, Normal = Normal, Elite = Elite,
-            Checking = Checking, Truncated = Truncated, EliteSeen = EliteSeen
+            Checking = Checking, Truncated = Truncated, EliteSeen = EliteSeen,
+            FirstEliteRelicChecked = FirstEliteRelicChecked, FirstEliteRelic = FirstEliteRelic
         };
     }
 }
