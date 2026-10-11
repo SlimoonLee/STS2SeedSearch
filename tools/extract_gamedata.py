@@ -56,7 +56,15 @@ for p in glob.glob(f'{REF}/MegaCrit.Sts2.Core.Models.Encounters/*.cs'):
     weak = find_one(r'public override bool IsWeak => (\w+)', src)
     tm = re.search(r'IEnumerable<EncounterTag> Tags =>(.*?);', src, re.S)
     tags = re.findall(r'EncounterTag\.(\w+)', tm.group(1)) if tm else []
-    enc_data[cls] = {'roomType': rt, 'isWeak': weak is not None and weak.lower() == 'true', 'tags': tags}
+    # Encounter groups expose every possible monster through AllPossibleMonsters.
+    # Keep declaration order and remove duplicates so the UI can explain a
+    # group without pretending that a random group has one fixed lineup.
+    monsters = []
+    for monster in re.findall(r'ModelDb\.Monster<(\w+)>\(\)', src):
+        if monster not in monsters:
+            monsters.append(monster)
+    enc_data[cls] = {'roomType': rt, 'isWeak': weak is not None and weak.lower() == 'true',
+                     'tags': tags, 'monsters': monsters}
 
 # ---------- 卡池 ----------
 CARD_EPOCH = {}  # epoch -> cards (全解锁档案不使用, 仅记录)
@@ -181,7 +189,8 @@ for a in ACTS:
     for e in d['encounters']:
         ed = enc_data[e]
         tags = ', '.join(f'"{t}"' for t in ed['tags']) or ''
-        lines.append(f'                new("{e}", "{ed["roomType"]}", Weak: {"true" if ed["isWeak"] else "false"}, Tags: new string[] {{ {tags} }}),')
+        monsters = ', '.join(f'"{m}"' for m in ed['monsters']) or ''
+        lines.append(f'                new("{e}", "{ed["roomType"]}", Weak: {"true" if ed["isWeak"] else "false"}, Tags: new string[] {{ {tags} }}, Monsters: new string[] {{ {monsters} }}),')
     lines.append('            }),')
 lines.append('    };')
 lines.append('')

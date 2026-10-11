@@ -20,6 +20,7 @@ public sealed class SelectionPanel : UserControl
     public string Filter { get => _filter.Text; set => _filter.Text = value; }
     public int OptionCount => _options.Count;
     public int VisibleCount => _list.Items.Count;
+    public string[] VisibleNames => _list.Items.Cast<ListViewItem>().Select(item => item.SubItems[0].Text).ToArray();
     public IEnumerable<string> OptionIds => _options.Select(o => o.Id);
     public string[] CheckedIds() => _options.Where(o => _selected.Contains(o.Id)).Select(o => o.Id).ToArray();
 

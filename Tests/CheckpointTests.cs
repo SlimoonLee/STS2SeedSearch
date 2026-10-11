@@ -42,6 +42,7 @@ static class CheckpointTests
             string checkpoint = output + ".checkpoint.json";
             Assert(partial.Canceled && File.Exists(checkpoint), "Canceled range did not leave a checkpoint");
             Assert(File.ReadLines(output).Count() > 0 && File.ReadLines(output).Count() < cfg.count, "Partial output was not block committed");
+            Assert(SearchEngine.HasCompatibleCheckpoint(cfg), "A matching checkpoint was not offered for continuation");
             using (var checkpointDoc = JsonDocument.Parse(File.ReadAllText(checkpoint)))
                 Assert(checkpointDoc.RootElement.GetProperty("CompletedBlocks").GetArrayLength() > 0, "Checkpoint did not record a completed block");
 
@@ -51,6 +52,7 @@ static class CheckpointTests
             File.Copy(checkpoint, checkpoint + ".bak", true);
             File.AppendAllText(output, "partial-uncommitted-line\n");
             File.WriteAllText(checkpoint, "{corrupt");
+            Assert(SearchEngine.HasCompatibleCheckpoint(cfg), "A valid backup checkpoint was not offered for continuation");
             var resumed = SearchEngine.Run(cfg);
             string[] lines = File.ReadAllLines(output);
             Assert(resumed.Resumed && resumed.RecoveredCheckpoint && resumed.RecoveredOutput && !resumed.Canceled

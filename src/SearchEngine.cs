@@ -24,6 +24,49 @@ public static class SearchEngine
 {
     const ulong CheckpointBlockSize = 4096;
 
+    /// <summary>
+    /// 判断当前配置是否有可以安全接续的随机范围检查点。
+    /// 这个只读探测与真正运行使用完全相同的指纹、范围和结果尾部校验，
+    /// 因而 GUI 可以在启动时显示“从上次继续”，而不会把旧条件误当成当前条件。
+    /// </summary>
+    public static bool HasCompatibleCheckpoint(SearchConfig config)
+    {
+        try
+        {
+            var cfg = config.ValidatedCopy();
+            if (cfg.seedListFile.Length > 0) return false;
+            string output = Path.GetFullPath(cfg.outFile);
+            string checkpointPath = SearchCheckpointStore.PathFor(output);
+            if (!File.Exists(output) || (!File.Exists(checkpointPath) && !File.Exists(checkpointPath + ".bak"))) return false;
+            var checkpoint = SearchCheckpointStore.Load(checkpointPath, out _);
+            ulong end = cfg.findUntilHit ? SeedUtil.SeedSpace : cfg.startIndex + (ulong)cfg.count;
+            string fingerprint = SearchCheckpointStore.Fingerprint(cfg, output);
+            string legacyFingerprint = SearchCheckpointStore.Fingerprint(cfg, output, legacy: true);
+            bool fingerprintMatches = checkpoint.Version == 1
+                ? checkpoint.Fingerprint == legacyFingerprint
+                : checkpoint.Version == 2 && checkpoint.RulesVersion == SearchCheckpointStore.RulesVersion
+                    && checkpoint.Fingerprint == fingerprint;
+            if (!fingerprintMatches || checkpoint.BaseIndex != cfg.startIndex || checkpoint.EndExclusive != end
+                || checkpoint.BlockSize != CheckpointBlockSize) return false;
+            if (checkpoint.Version == 2)
+            {
+                long length = new FileInfo(output).Length;
+                if (length < checkpoint.OutputBytes) return false;
+                if (checkpoint.OutputBytes > 0 && !string.Equals(
+                    DurableFile.TailSha256(output, checkpoint.OutputBytes), checkpoint.OutputSha256,
+                    StringComparison.OrdinalIgnoreCase)) return false;
+            }
+            return true;
+        }
+        catch
+        {
+            // A damaged/stale checkpoint is deliberately not offered as a
+            // continuation.  The normal start path still reports its detailed
+            // recovery error if the user explicitly selects that output.
+            return false;
+        }
+    }
+
     public static SearchResult Run(SearchConfig config, Action<Hit> onHit = null,
         Action<SearchProgress> onProgress = null, CancellationToken ct = default)
     {

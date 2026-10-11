@@ -3,7 +3,10 @@ namespace SeedSearch;
 public readonly record struct Int2(int A, int B);
 public readonly record struct Int4(int A, int B, int C, int D);
 
-public sealed record EncDef(string Name, string RoomType, bool Weak, string[] Tags);
+// Monsters is the complete member set declared by the game's AllPossibleMonsters
+// for this encounter.  Older generated tables may omit it, so keep the
+// parameter optional for backwards-compatible configs and fixtures.
+public sealed record EncDef(string Name, string RoomType, bool Weak, string[] Tags, string[] Monsters = null);
 public sealed record ActDef(
     string Name, int Index, int Rooms, int WeakCount,
     bool HasRestGauss, Int4 RestGauss, Int2 RestUniform, bool UnknownMinus,

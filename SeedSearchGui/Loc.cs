@@ -8,12 +8,12 @@ namespace SeedSearchGui;
 /// </summary>
 public static class Loc
 {
-    static readonly Dictionary<string, string> _cards, _relics, _encounters, _events;
+    static readonly Dictionary<string, string> _cards, _relics, _encounters, _monsters, _events;
     public static bool Loaded { get; }
 
     static Loc()
     {
-        (_cards, _relics, _encounters, _events) = (new(), new(), new(), new());
+        (_cards, _relics, _encounters, _monsters, _events) = (new(), new(), new(), new(), new());
         string dir = FindLocDir();
         if (dir == null) return;
         try
@@ -21,6 +21,7 @@ public static class Loc
             Load(_cards, Path.Combine(dir, "cards.json"));
             Load(_relics, Path.Combine(dir, "relics.json"));
             Load(_encounters, Path.Combine(dir, "encounters.json"));
+            Load(_monsters, Path.Combine(dir, "monsters.json"));
             Load(_events, Path.Combine(dir, "events.json"));
             Loaded = true;
         }
@@ -51,6 +52,7 @@ public static class Loc
     public static string Card(string cls) => _cards.TryGetValue(Snake(cls), out var v) ? v : cls;
     public static string Relic(string cls) => _relics.TryGetValue(Snake(cls), out var v) ? v : cls;
     public static string Encounter(string eid) => _encounters.TryGetValue(eid, out var v) ? v : eid;
+    public static string Monster(string cls) => _monsters.TryGetValue(Snake(cls), out var v) ? v : cls;
 
     public static string Snake(string name) => SeedSearch.Game.Snake(name);
 

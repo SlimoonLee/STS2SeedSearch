@@ -15,6 +15,7 @@ public sealed class MainForm : Form
         _discovered = new() { Text = "暗港已发现", Checked = true, AutoSize = true },
         _fromUnknown = new() { Text = "从首个问号开始检查战斗奖励", Checked = true, AutoSize = true },
         _untilFound = new() { Text = "找到一个为止（不限制数量）", AutoSize = true },
+        _continueLast = new() { Text = "从上次继续", AutoSize = true },
         _resume = new() { Text = "自动续跑（检查点）", Checked = true, AutoSize = true },
         _eliteBlock = new() { Text = "精英堵路（所有路线都必须经过精英）", AutoSize = true },
         _noRestBeforeElite = new() { Text = "第一个精英前禁止火堆", AutoSize = true };
@@ -39,9 +40,9 @@ public sealed class MainForm : Form
     CancellationTokenSource _cts;
     Task<SearchResult> _task;
     SearchProgress _latest;
-    string _cardCharacter = "", _lastOutput = "", _automaticOutput;
+    string _cardCharacter = "", _lastOutput = "", _automaticOutput, _continuationOutput;
     int _queued;
-    bool _loading = true, _closeRequested;
+    bool _loading = true, _closeRequested, _changingContinuation;
     const int DisplayLimit = 1000;
     static string PreferencesPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SeedSearch", "ui.json");
 
@@ -67,7 +68,13 @@ public sealed class MainForm : Form
         WireEvents(); _loading = false; Summary();
         if (restorePreferences && File.Exists(PreferencesPath))
         {
-            try { ApplyConfig(SearchConfig.Load(PreferencesPath)); NewOutput(); _status.Text = "已恢复上次筛选条件"; }
+            try
+            {
+                var previous = SearchConfig.Load(PreferencesPath);
+                ApplyConfig(previous);
+                if (OfferContinuation(previous, replaceWhenMissing: true)) _status.Text = "发现可续搜记录，已选中“从上次继续”";
+                else _status.Text = "已恢复上次筛选条件";
+            }
             catch (Exception e) { _status.Text = "上次配置未恢复：" + e.Message; }
         }
     }
@@ -108,7 +115,7 @@ public sealed class MainForm : Form
         var rangePage = new TabPage("范围与文件");
         var rangeScroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
         rangeScroll.Controls.Add(SettingsGroup("搜索范围与文件", new[] {
-            ("", (Control)_untilFound), ("", (Control)_resume), ("数量", _count), ("随机键", _rng), ("起始索引", _offset), ("线程", _threads), ("保存间隔(秒)", _checkpointInterval),
+            ("", (Control)_untilFound), ("", (Control)_continueLast), ("", (Control)_resume), ("数量", _count), ("随机键", _rng), ("起始索引", _offset), ("线程", _threads), ("保存间隔(秒)", _checkpointInterval),
             ("输入名单", BrowseRow(_input, false)), ("输出 JSONL", BrowseRow(_output, true)),
             ("", Note("找到为止：忽略数量，按当前条件持续搜索，命中一个后保存并自动停止，也可手动停止。名单模式找到即停；未命中则处理到名单末尾。")),
             ("", Note("线程 0=自动。随机范围会保存带校验和的 .checkpoint.json 及 .bak；断电后只重扫最近未提交块，并直接跳过已完成范围。结果旁还会保留 .errors.jsonl 排错记录；名单模式不使用检查点。")) }));
@@ -205,15 +212,19 @@ public sealed class MainForm : Form
 
     void WireEvents()
     {
-        _character.SelectedIndexChanged += (_, _) => { if (!_loading) { PopulateCards(); Summary(); } };
-        _act.SelectedIndexChanged += (_, _) => { if (!_loading) { PopulateBosses(); PopulateEncounters(); Summary(); } };
-        _mode.SelectedIndexChanged += (_, _) => Summary();
-        _mapMode.SelectedIndexChanged += (_, _) => Summary();
-        _untilFound.CheckedChanged += (_, _) => Summary(); _resume.CheckedChanged += (_, _) => Summary();
-        _unlocked.CheckedChanged += (_, _) => Summary(); _discovered.CheckedChanged += (_, _) => Summary();
-        foreach (var list in new[] { _positives, _curses, _bosses, _cards, _strongs, _firstElites }) list.SelectionChanged += (_, _) => Summary();
-        foreach (var number in new[] { _asc, _fights, _unknowns, _lastFloor, _strongPrefix }) number.ValueChanged += (_, _) => Summary();
-        _eliteBlock.CheckedChanged += (_, _) => Summary(); _noRestBeforeElite.CheckedChanged += (_, _) => Summary();
+        _character.SelectedIndexChanged += (_, _) => { if (!_loading) { InvalidateContinuation(); PopulateCards(); Summary(); } };
+        _act.SelectedIndexChanged += (_, _) => { if (!_loading) { InvalidateContinuation(); PopulateBosses(); PopulateEncounters(); Summary(); } };
+        _mode.SelectedIndexChanged += (_, _) => { InvalidateContinuation(); Summary(); };
+        _mapMode.SelectedIndexChanged += (_, _) => { InvalidateContinuation(); Summary(); };
+        _untilFound.CheckedChanged += (_, _) => { InvalidateContinuation(); Summary(); };
+        _resume.CheckedChanged += (_, _) => Summary();
+        _continueLast.CheckedChanged += (_, _) => ContinuationChanged();
+        _unlocked.CheckedChanged += (_, _) => { InvalidateContinuation(); Summary(); };
+        _discovered.CheckedChanged += (_, _) => { InvalidateContinuation(); Summary(); };
+        foreach (var list in new[] { _positives, _curses, _bosses, _cards, _strongs, _firstElites }) list.SelectionChanged += (_, _) => { InvalidateContinuation(); Summary(); };
+        foreach (var number in new[] { _asc, _fights, _unknowns, _lastFloor, _strongPrefix, _count, _rng, _offset }) number.ValueChanged += (_, _) => { InvalidateContinuation(); Summary(); };
+        _eliteBlock.CheckedChanged += (_, _) => { InvalidateContinuation(); Summary(); };
+        _noRestBeforeElite.CheckedChanged += (_, _) => { InvalidateContinuation(); Summary(); };
         _start.Click += async (_, _) => await StartSearch();
         _stop.Click += (_, _) => { _stop.Enabled = false; _status.Text = "正在停止并保存结果…"; _cts?.Cancel(); };
         _copy.Click += (_, _) => { if (_results.SelectedItems.Count > 0) Clipboard.SetText(string.Join(Environment.NewLine, _results.SelectedItems.Cast<ListViewItem>().Select(item => ((Hit)item.Tag).seed))); };
@@ -256,8 +267,15 @@ public sealed class MainForm : Form
         string act = Loc.Acts[Math.Max(0, _act.SelectedIndex)].Id;
         var acts = GameData.Acts.Where(a => a.Index == 0 && (act.Length == 0 || a.Name == act)).ToArray();
         string[] strong = _strongs.CheckedIds(), elites = _firstElites.CheckedIds();
-        _strongs.SetItems(acts.SelectMany(a => a.Regular.Select(e => new SelectionOption(e.Name, Loc.Encounter(Game.Snake(e.Name)), "强怪池", a.Name))), strong);
-        _firstElites.SetItems(acts.SelectMany(a => a.Elites.Select(e => new SelectionOption(e.Name, Loc.Encounter(Game.Snake(e.Name)), "精英池", a.Name))), elites);
+        string Display(EncDef encounter)
+        {
+            string group = Loc.Encounter(Game.Snake(encounter.Name));
+            string members = encounter.Monsters is { Length: > 0 }
+                ? string.Join("、", encounter.Monsters.Select(m => Loc.Monster(Game.Snake(m)))) : "成员未知";
+            return $"{group}（{members}）";
+        }
+        _strongs.SetItems(acts.SelectMany(a => a.Regular.Select(e => new SelectionOption(e.Name, Display(e), "强怪池", a.Name))), strong);
+        _firstElites.SetItems(acts.SelectMany(a => a.Elites.Select(e => new SelectionOption(e.Name, Display(e), "精英池", a.Name))), elites);
     }
     void Summary()
     {
@@ -267,7 +285,7 @@ public sealed class MainForm : Form
         _count.Enabled = !_untilFound.Checked;
         _summary.Text = $"{Loc.Characters[_character.SelectedIndex].Cn} · A{_asc.Value} · {Loc.Acts[_act.SelectedIndex].Cn} · Boss {_bosses.CheckedIds().Length} 项 · 强怪 {_strongs.CheckedIds().Length}/{_strongPrefix.Value} · 首精英 {_firstElites.CheckedIds().Length} 项 · 堵路 {_eliteBlock.Checked} · 禁火 {_noRestBeforeElite.Checked} · 捏奥 {_positives.CheckedIds().Length}+{_curses.CheckedIds().Length} 项 · 卡牌 {_cards.CheckedIds().Length} 项   |   "
             + (_fights.Value == 0 && _unknowns.Value == 0 ? "仅筛开局（不建图）" : $"前 {_lastFloor.Value} 层 · {(_mapMode.SelectedIndex == 0 ? "简图" : "全图")} · {(_mode.SelectedIndex == 0 ? "全部路线" : "存在路线")} · 检查 {_fights.Value} 场 · 前 {_unknowns.Value} 个 ? 出怪")
-            + (_untilFound.Checked ? " · 找到一个即停" : "") + (_resume.Checked ? " · 自动续跑" : "");
+            + (_untilFound.Checked ? " · 找到一个即停" : "") + (_continueLast.Checked ? " · 从上次继续" : _resume.Checked ? " · 自动续跑" : "");
         if (_latest != null && _task is { IsCompleted: true }) _status.Text = "条件已修改 · 当前显示上次搜索结果";
     }
     internal SearchConfig ReadConfig() => new SearchConfig
@@ -289,6 +307,7 @@ public sealed class MainForm : Form
         var cfg = config.ValidatedCopy(); _loading = true;
         try
         {
+            _continuationOutput = null; _continueLast.Checked = false; _continueLast.Enabled = false;
             _cardCharacter = ""; _cardMemory.Clear(); _bossMemory.Clear();
             _character.SelectedIndex = Array.FindIndex(Loc.Characters, c => c.Id == cfg.character);
             _act.SelectedIndex = Array.FindIndex(Loc.Acts, a => a.Id == cfg.act1);
@@ -305,17 +324,73 @@ public sealed class MainForm : Form
         }
         finally { _loading = false; Summary(); }
     }
+    bool OfferContinuation(SearchConfig config, bool replaceWhenMissing = false)
+    {
+        bool found = SearchEngine.HasCompatibleCheckpoint(config);
+        _changingContinuation = true;
+        try
+        {
+            _continuationOutput = found ? Path.GetFullPath(config.outFile) : null;
+            _continueLast.Enabled = found;
+            _continueLast.Checked = found;
+            if (found)
+            {
+                _output.Text = _continuationOutput;
+                _resume.Checked = true;
+            }
+            else if (replaceWhenMissing) NewOutput();
+        }
+        finally { _changingContinuation = false; }
+        Summary();
+        return found;
+    }
+    void ContinuationChanged()
+    {
+        if (_loading || _changingContinuation) return;
+        _changingContinuation = true;
+        try
+        {
+            if (_continueLast.Checked && !string.IsNullOrWhiteSpace(_continuationOutput))
+            {
+                _output.Text = _continuationOutput;
+                _resume.Checked = true;
+            }
+            else
+            {
+                _continuationOutput = null;
+                _continueLast.Enabled = false;
+                NewOutput();
+            }
+        }
+        finally { _changingContinuation = false; }
+        Summary();
+    }
+    void InvalidateContinuation()
+    {
+        if (_loading || _changingContinuation || !_continueLast.Checked) return;
+        _changingContinuation = true;
+        try { NewOutput(); }
+        finally { _changingContinuation = false; }
+    }
     void NewOutput()
     {
         var now = TimeZoneInfo.ConvertTimeBySystemTimeZoneId(DateTime.UtcNow, "China Standard Time");
         _automaticOutput = Path.GetFullPath(Path.Combine("results", $"hits-{now:yyyyMMdd-HHmmss-fff}.jsonl"));
+        _continuationOutput = null;
+        _continueLast.Checked = false;
+        _continueLast.Enabled = false;
         _output.Text = _automaticOutput;
     }
     void LoadConfig()
     {
         using var dialog = new OpenFileDialog { Filter = "搜索配置|*.json" };
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
-        try { ApplyConfig(SearchConfig.Load(dialog.FileName)); _status.Text = "已载入：" + Path.GetFileName(dialog.FileName); }
+        try
+        {
+            var config = SearchConfig.Load(dialog.FileName);
+            ApplyConfig(config);
+            _status.Text = OfferContinuation(config) ? "已载入配置，并发现可续搜记录" : "已载入：" + Path.GetFileName(dialog.FileName);
+        }
         catch (Exception e) { Error(e); }
     }
     void SaveConfig()
@@ -333,7 +408,16 @@ public sealed class MainForm : Form
     {
         if (_task is { IsCompleted: false }) return;
         SearchConfig cfg;
-        try { if (_output.Text == _automaticOutput) NewOutput(); cfg = ReadConfig(); }
+        try
+        {
+            if (_continueLast.Checked && !string.IsNullOrWhiteSpace(_continuationOutput))
+            {
+                _output.Text = _continuationOutput;
+                _resume.Checked = true;
+            }
+            else if (_output.Text == _automaticOutput) NewOutput();
+            cfg = ReadConfig();
+        }
         catch (Exception e) { Error(e); return; }
         _lastOutput = Path.GetFullPath(cfg.outFile); _latest = null;
         _results.Items.Clear(); _pending.Clear(); _queued = 0;
@@ -354,6 +438,14 @@ public sealed class MainForm : Form
             if (!result.Canceled) _progress.Value = 1000;
             string outcome = cfg.findUntilHit && result.Progress.Hits > 0 ? "已找到，自动停止" : result.Canceled ? "已停止" : "完成";
             _status.Text = $"{outcome}{(result.Resumed ? "（从检查点续跑" + (result.RecoveredCheckpoint ? "备份" : "") + (result.RecoveredOutput ? "，已回退尾部" : "") + "）" : "")} · 评估 {result.Progress.Evaluated:N0} · 命中 {result.Progress.Hits:N0} · {result.Progress.Elapsed.TotalSeconds:F1}s";
+            if (!result.Canceled && (cfg.seedListFile.Length > 0 || string.IsNullOrEmpty(result.CheckpointPath) || !File.Exists(result.CheckpointPath)))
+            {
+                // A completed range has no checkpoint to continue.  Keep the
+                // finished file available through _lastOutput, but prepare a
+                // fresh output for the next click instead of reporting a
+                // misleading stale-continuation error.
+                NewOutput();
+            }
             if (result.Progress.Hits == 0)
                 _detail.Text = result.Canceled ? "搜索已停止，尚未找到符合条件的种子。"
                     : cfg.seedListFile.Length > 0 ? "输入名单已处理完，未找到符合条件的种子。清空输入名单可直接枚举新种子。"
@@ -440,6 +532,16 @@ public sealed class MainForm : Form
             if (fight.potion.Length > 0) text.Append($"药水：{fight.potion}\r\n");
             if (fight.eliteRelic.Length > 0) text.Append($"遗物：{Loc.Relic(fight.eliteRelic)}\r\n");
         }
+        if (hit.treasures.Length > 0)
+        {
+            text.Append("\r\n宝箱奖励序列（金币 + 遗物）：\r\n");
+            for (int i = 0; i < hit.treasures.Length; i++)
+            {
+                string[] parts = hit.treasures[i].Split('+', 2);
+                string relic = parts.Length == 2 ? Loc.Relic(parts[1]) : hit.treasures[i];
+                text.Append($"  {i + 1}. {(parts.Length == 2 ? parts[0] + "+" + relic : relic)}\r\n");
+            }
+        }
         text.Append("\r\n已验证路线前缀：\r\n" + string.Join(" → ", hit.route));
         if (hit.unknownRolls.Length > 0) text.Append("\r\n问号掷点：" + string.Join(" → ", hit.unknownRolls));
         return text.ToString();
@@ -469,6 +571,7 @@ public sealed class MainForm : Form
             || !cfg.firstEliteAllow.SequenceEqual(new[] { "PhantasmalGardenersElite" })
             || !cfg.eliteBlock || !cfg.noRestBeforeFirstElite
             || _strongPrefix.Value != 2 || !_eliteBlock.Checked || !_noRestBeforeElite.Checked
+            || !_strongs.VisibleNames.Any(name => name.Contains("邪教徒") || name.Contains("CalcifiedCultist"))
             || _strongs.VisibleCount == 0 || _firstElites.VisibleCount == 0)
             throw new Exception("遭遇条件控件或配置往返未保留。");
     }
